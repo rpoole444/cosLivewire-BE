@@ -1,5 +1,8 @@
 // models/Event.js
-const knex = require('knex'); // Adjust the path as necessary for your project structure
+const environment = process.env.NODE_ENV || 'development';
+const config = require('../knexfile')[environment];
+const knex = require('knex')(config);
+ // Adjust the path as necessary for your project structure
 
 const createEvent = async (eventData) => {
   return knex('events').insert(eventData).returning('*'); // Assuming PostgreSQL for returning inserted row
@@ -16,8 +19,13 @@ const updateEventStatus = (eventId, isApproved) => {
     .returning('*'); // For PostgreSQL to return the updated row
 };
 
+const getAllEvents = async () => {
+  return knex('events').select('*');
+};
+
 module.exports = {
   createEvent,
   getEventsForReview,
-  updateEventStatus
+  updateEventStatus,
+  getAllEvents
 };
