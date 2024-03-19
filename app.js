@@ -37,8 +37,8 @@ app.use('/api/auth', authRouter)
 // Registration endpoint
 authRouter.post('/register', async (req, res, next) => {
   try{
-    const { email, password } = req.body;
-    if(!email || !password){
+    const { first_name, last_name, email, password } = req.body;
+    if(!first_name || !last_name || !email || !password){
       return res.status(400).json({error: 'Please provide an email and password'});
     }
 
@@ -46,7 +46,7 @@ authRouter.post('/register', async (req, res, next) => {
     if(existingUser){
       return res.status(400).json({error: 'User already exists'});
     }
-    await createUser(email,password);
+    await createUser(first_name, last_name, email, password);
     res.status(201).json({message: 'User created successfully'})
   } catch (err) {
     console.error(err);

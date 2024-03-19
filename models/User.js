@@ -4,10 +4,12 @@ const knex = require('knex')(config);
 const bcrypt = require('bcrypt');
 
 
-const createUser = async (email, password) => {
+const createUser = async (firstName, lastName, email, password) => {
   const hashedPassword = await bcrypt.hash(password, 10);
   return knex('users').insert({
-    email,
+    first_name: firstName,
+    last_name: lastName,
+    email: email,
     password: hashedPassword,
   });
 }
