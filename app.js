@@ -1,4 +1,5 @@
 require('dotenv').config(); 
+const cors = require('cors');
 
 const express = require('express');
 const session = require('express-session');
@@ -8,7 +9,10 @@ const { createUser, findUserByEmail, findUserById } = require('./models/User');
 const { createEvent, getAllEvents, getEventsForReview, updateEventStatus } = require('./models/Event');
 // const flash = require('connect-flash');
 const app = express();
-
+app.use(cors({
+  origin: 'http://localhost:3001', // Update to match the domain you're making the request from
+  credentials: true, // Allow cookies to be sent
+}));
 app.use(express.urlencoded({ extended:false }));
 app.use(express.json());
 //session setup
