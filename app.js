@@ -74,8 +74,18 @@ authRouter.post('/login', (req, res, next) => {
 
 //EVENT Endpoints
 eventRouter.post('/submit', async (req, res) => {
-  try {
-    const eventData = req.body; // Include user_id, title, description, location, date, etc.
+  // Ensure the user is authenticated
+
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+ try {
+    // Include user_id in the eventData
+    const eventData = {
+      ...req.body,
+      user_id: req.user.id  // Assuming the user object has an id field
+    };
+
     const event = await createEvent(eventData);
     res.status(201).json({ event: event[0], message: 'Event submitted successfully.' });
   } catch (error) {
