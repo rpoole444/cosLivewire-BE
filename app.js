@@ -67,9 +67,18 @@ authRouter.post('/login', (req, res, next) => {
         return next(err);
       }
       // Send back user info and possibly a session token, depending on your session handling strategy
-      return res.json({ message: 'Logged in successfully', user: { id: user.id, email: user.email } });
+      return res.json({ message: 'Logged in successfully', user: { id: user.id, first_name: user.first_name, last_name:user.last_name, email: user.email } });
     });
   })(req, res, next);
+});
+
+authRouter.post('/logout', (req, res, next) => {
+ req.logout(function(err) {
+    if (err) {
+      return next(err);
+    }
+    res.json({ message: 'Logged out successfully' });
+  })
 });
 
 //EVENT Endpoints
