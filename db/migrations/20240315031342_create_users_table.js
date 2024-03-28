@@ -6,6 +6,7 @@ exports.up = function(knex) {
     table.string('email').unique().notNullable();
     table.string('password').notNullable();
     table.boolean('is_admin').defaultTo(false);
+    table.boolean('is_logged_in').defaultTo(false);
     table.timestamps(true, true);
   })
 };
