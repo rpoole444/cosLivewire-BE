@@ -23,7 +23,14 @@ const getAllEvents = async () => {
   return knex('events').select('*');
 };
 
+const updateEvent = async(eventId, eventData) => {
+  return knex('events')
+    .where({ id: eventId })
+    .update(eventData)
+    .returning('*');
+}
 module.exports = {
+  updateEvent,
   createEvent,
   getEventsForReview,
   updateEventStatus,
