@@ -14,16 +14,38 @@ const createUser = async (firstName, lastName, email, password) => {
   });
 }
 
+const updateUserLoginStatus = async (userId, isLoggedIn) => {
+  if(userId === undefined){
+    throw new Error('UserId is Undefied')
+  }
+  return knex('users')
+    .where({ id:userId })
+    .update({ is_logged_in: isLoggedIn })
+    .returning('*');
+}
+const updateUserAdminStatus = (userId, isAdmin) => {
+  return knex('users')
+    .where({ id:userId })
+    .update({ is_admin: isAdmin })
+    .returning('*');
+};
 const findUserByEmail = (email) => {
   return knex('users').where({ email }).first();
 }
 
+const getAllUsers = () => {
+  return knex('users').select('id', 'first_name', 'last_name', 'email', 'is_admin'); // Adjust according to your column names
+};
 const findUserById = (id) => {
-  return knex('users').where({ id }).first();
+  return knex('users').where({ id: id }).first();
 }
 
 module.exports = {
+  getAllUsers,
+  findUserById,
+  updateUserAdminStatus,
   createUser,
   findUserByEmail,
-  findUserById
+  findUserById,
+  updateUserLoginStatus
 }
