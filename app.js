@@ -5,8 +5,8 @@ const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 const initializePassport = require('./passport-config')
-const { createUser, findUserByEmail, findUserById } = require('./models/User');
-const { createEvent, getAllEvents, getEventsForReview, updateEventStatus } = require('./models/Event');
+const { updateUserLoginStatus,getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
+const { createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
 // const flash = require('connect-flash');
 const app = express();
 app.use(cors({
@@ -54,32 +54,108 @@ authRouter.post('/register', async (req, res, next) => {
   }
 });
 
+//checks if user is already logged in
+authRouter.get('/session', (req, res) => {
+  if (req.isAuthenticated()) {
+    // Assuming you send back relevant user information but not sensitive information
+    return res.json({ isLoggedIn: true, user: req.user });
+  } else {
+    return res.json({ isLoggedIn: false });
+  }
+});
+
+
+
 authRouter.post('/login', (req, res, next) => {
-  passport.authenticate('local', (err, user, info) => {
+  passport.authenticate('local', async (err, user, info) => {
     if (err) {
       return next(err);
     }
     if (!user) {
       return res.status(401).json({ message: info.message });
     }
-    req.logIn(user, (err) => {
+    req.logIn(user, async (err) => {
       if (err) {
         return next(err);
       }
-      // Send back user info and possibly a session token, depending on your session handling strategy
-      return res.json({ message: 'Logged in successfully', user: { id: user.id, first_name: user.first_name, last_name:user.last_name, email: user.email } });
+   try {
+        // Update the is_logged_in property to true upon successful login
+        await updateUserLoginStatus(user.id, true);
+        return res.json({
+          message: 'Logged in successfully',
+          user: { id: user.id, first_name: user.first_name, last_name: user.last_name, email: user.email, is_logged_in: user.is_logged_in}
+        });
+      } catch (updateError) {
+        console.error(updateError);
+        // Handle error, possibly sending back a 500 server error response
+        return next(updateError);
+      }
     });
   })(req, res, next);
 });
 
-authRouter.post('/logout', (req, res, next) => {
- req.logout(function(err) {
-    if (err) {
-      return next(err);
-    }
-    res.json({ message: 'Logged out successfully' });
-  })
+authRouter.post('/logout', async (req, res, next) => {
+  if (!req.isAuthenticated()) {
+    return res.status(403).json({ message: 'Not logged in' });
+  }
+
+  try {
+    const userId = req.user.id; // Get the user id from the session
+    await updateUserLoginStatus(userId, false); // Update logged in status to false
+
+    req.logout(err => {
+      if (err) {
+        console.error(err);
+        return next(err); // Use next to pass the error to your error handling middleware
+      }
+
+      req.session.destroy(() => {
+        res.clearCookie('connect.sid', { path: '/' });
+        return res.status(200).json({ message: 'Logged out successfully' });
+      });
+    });
+  } catch (error) {
+    console.error('Error during logout:', error);
+    return next(error); // Pass the error to the error handling middleware
+  }
 });
+
+
+authRouter.get('/users', async (req, res) => {
+  if (!req.isAuthenticated() || !req.user.is_admin) { // Ensure isAdmin logic matches your setup
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  try {
+    const users = await getAllUsers();
+    res.json(users);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+authRouter.patch('/setAdmin/:userId', async (req, res) => {
+  if (!req.isAuthenticated() || !req.user.is_admin) {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  const { userId } = req.params;
+  const { is_admin } = req.body; // Assuming you send {"is_admin": true} or {"is_admin": false}
+
+  try {
+    // Assuming updateUserAdminStatus is a function that updates the is_admin field for a user
+    const user = await updateUserAdminStatus(userId, is_admin);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json({ message: 'User admin status updated successfully', user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 
 //EVENT Endpoints
 eventRouter.post('/submit', async (req, res) => {
@@ -125,6 +201,28 @@ eventRouter.put('/review/:eventId', async (req, res) => {
     res.status(500).json({ message: 'Internal server error.' });
   }
 });
+//edit event data.
+eventRouter.put('/:eventId', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+  
+  const { eventId } = req.params;
+  const eventData = req.body; // Data to update the event with
+
+  try {
+    const updatedEvent = await updateEvent(eventId, eventData);
+    if (updatedEvent.length === 0) { // Check if the update was successful
+      return res.status(404).json({ message: 'Event not found' });
+    }
+
+    res.json({ event: updatedEvent[0], message: 'Event updated successfully.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 
 eventRouter.get('/', async (req, res) => {
   try {
