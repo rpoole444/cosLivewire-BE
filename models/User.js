@@ -34,7 +34,7 @@ const findUserByEmail = (email) => {
 }
 
 const getAllUsers = () => {
-  return knex('users').select('id', 'first_name', 'last_name', 'email', 'is_admin'); // Adjust according to your column names
+  return knex('users').select('*'); // Adjust according to your column names
 };
 const findUserById = (id) => {
   return knex('users').where({ id: id }).first();
