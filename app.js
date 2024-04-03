@@ -64,8 +64,6 @@ authRouter.get('/session', (req, res) => {
   }
 });
 
-
-
 authRouter.post('/login', (req, res, next) => {
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
@@ -83,7 +81,7 @@ authRouter.post('/login', (req, res, next) => {
         await updateUserLoginStatus(user.id, true);
         return res.json({
           message: 'Logged in successfully',
-          user: { id: user.id, first_name: user.first_name, last_name: user.last_name, email: user.email, is_logged_in: user.is_logged_in}
+          user: { id: user.id, first_name: user.first_name, last_name: user.last_name, email: user.email, is_logged_in: user.is_logged_in, is_admin:user.is_admin}
         });
       } catch (updateError) {
         console.error(updateError);
