@@ -7,6 +7,11 @@ exports.up = function(knex) {
     table.string('password').notNullable();
     table.boolean('is_admin').defaultTo(false);
     table.boolean('is_logged_in').defaultTo(false);
+    table.string('reset_token'); 
+    table.datetime('reset_token_expires');
+    table.specificType('approved_events', 'integer[]').defaultTo('{}'); // Adjust type as needed
+    table.string('user_description');
+    table.text('top_music_genres','[]') 
     table.timestamps(true, true);
   })
 };
@@ -14,3 +19,4 @@ exports.up = function(knex) {
 exports.down = function(knex) {
   return knex.schema.dropTable('users');
 };
+
