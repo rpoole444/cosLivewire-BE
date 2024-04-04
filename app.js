@@ -112,7 +112,16 @@ authRouter.post('/login', (req, res, next) => {
         await updateUserLoginStatus(user.id, true);
         return res.json({
           message: 'Logged in successfully',
-          user: { id: user.id, first_name: user.first_name, last_name: user.last_name, email: user.email, is_logged_in: user.is_logged_in, is_admin:user.is_admin}
+          user: { 
+            id: user.id, 
+            first_name: user.first_name, 
+            last_name: user.last_name, 
+            email: user.email, 
+            is_logged_in: user.is_logged_in, 
+            is_admin:user.is_admin,
+            top_music_genres: user.top_music_genres,
+            user_description: user.user_description,
+           }
         });
       } catch (updateError) {
         console.error(updateError);
