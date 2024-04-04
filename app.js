@@ -7,7 +7,7 @@ const passport = require('passport');
 const initializePassport = require('./passport-config')
 const { updateUserLoginStatus,getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
 const { createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
-// const flash = require('connect-flash');
+
 const app = express();
 app.use(cors({
   origin: 'http://localhost:3001', // Update to match the domain you're making the request from
@@ -33,11 +33,20 @@ const eventRouter = express.Router();
 //use routers
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter)
-
+//for authRouter
+const crypto = require('crypto'); // Node.js built-in module
+const bcrypt = require('bcrypt');
 // Registration endpoint
 authRouter.post('/register', async (req, res, next) => {
   try{
-    const { first_name, last_name, email, password } = req.body;
+    const { 
+      first_name, 
+      last_name, 
+      email, 
+      password, 
+      user_description, 
+      top_music_genres,
+    } = req.body;
     if(!first_name || !last_name || !email || !password){
       return res.status(400).json({error: 'Please provide an email and password'});
     }
@@ -46,13 +55,35 @@ authRouter.post('/register', async (req, res, next) => {
     if(existingUser){
       return res.status(400).json({error: 'User already exists'});
     }
-    await createUser(first_name, last_name, email, password);
-    res.status(201).json({message: 'User created successfully'})
+
+    // Check if topMusicGenres is already an array or a string, and handle accordingly
+    const genres = Array.isArray(top_music_genres) 
+      ? top_music_genres.slice(0, 3) 
+      : typeof top_music_genres === 'string'
+      ? top_music_genres.split(',').slice(0, 3) 
+      : [];
+
+    const newUser = await createUser({
+      firstName: first_name,
+      lastName: last_name,
+      email,
+      password,
+      userDescription: user_description,
+      topMusicGenres: genres,
+    });
+
+    const { password: _, ...userWithoutPassword } = newUser;
+
+     res.status(201).json({ 
+      message: 'User created successfully',
+      user: userWithoutPassword,
+    });
   } catch (err) {
     console.error(err);
-    next(err);
+    res.status(500).json({ error: 'An error occurred while creating the user' });
   }
 });
+
 
 //checks if user is already logged in
 authRouter.get('/session', (req, res) => {
@@ -117,7 +148,51 @@ authRouter.post('/logout', async (req, res, next) => {
     return next(error); // Pass the error to the error handling middleware
   }
 });
+authRouter.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  const user = await findUserByEmail(email);
 
+  if (!user) {
+    return res.status(404).json({ message: 'No user found with that email.' });
+  }
+
+  // Generate a password reset token
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const hash = await bcrypt.hash(resetToken, Number(process.env.BCRYPT_SALT_ROUNDS));
+
+  // Token expires in one hour
+  const expireTime = new Date(Date.now() + 3600000); // 1 hour in milliseconds
+
+  // Save the token and expiration to the database
+  await setPasswordResetToken(user.email, hash, expireTime);
+
+  // Send email to the user with the reset link
+  // You'll need to set up nodemailer or another email service provider
+  sendPasswordResetEmail(user.email, `http://localhost:3000/reset-password/${resetToken}`);
+
+  res.json({ message: 'Please check your email for the password reset link.' });
+});
+
+authRouter.post('/reset-password/:token', async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  // Check if the token is valid and not expired
+  const user = await findUserByResetToken(token);
+
+  if (!user) {
+    return res.status(400).json({ message: 'Invalid or expired password reset token.' });
+  }
+
+  // Hash the new password and save it
+  const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS));
+  await resetPassword(token, hashedPassword);
+
+  // Clear the reset token and expiration from the database
+  await clearUserResetToken(user.id);
+
+  res.json({ message: 'Password reset successfully. You can now login with your new password.' });
+});
 
 authRouter.get('/users', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) { // Ensure isAdmin logic matches your setup
