@@ -6,7 +6,7 @@ const session = require('express-session');
 const passport = require('passport');
 const initializePassport = require('./passport-config')
 const { updateUserLoginStatus,getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
-const { createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
+const { findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
 
 const app = express();
 app.use(cors({
@@ -305,6 +305,16 @@ eventRouter.put('/:eventId', async (req, res) => {
   }
 });
 
+eventRouter.get('/:eventId', async function(req, res) {
+  const { eventId } = req.params;
+  try {
+    const event = await findEventById(eventId);
+    res.json(event);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+})
 
 eventRouter.get('/', async (req, res) => {
   try {
