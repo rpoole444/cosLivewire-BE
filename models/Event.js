@@ -29,10 +29,15 @@ const updateEvent = async(eventId, eventData) => {
     .update(eventData)
     .returning('*');
 }
+
+const findEventById = (eventId) => {
+  return knex('events').where({ id: eventId }).first();
+}
 module.exports = {
   updateEvent,
   createEvent,
   getEventsForReview,
   updateEventStatus,
-  getAllEvents
+  getAllEvents,
+  findEventById
 };
