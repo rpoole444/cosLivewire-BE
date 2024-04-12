@@ -5,7 +5,8 @@ const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 const initializePassport = require('./passport-config')
-const { updateUserLoginStatus,getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
+const { sendPasswordResetEmail,} = require("./models/mailer")
+const { findUserByResetToken, resetPassword, clearUserResetToken, setPasswordResetToken, updateUserLoginStatus, getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
 const { findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
 
 const app = express();
@@ -33,9 +34,12 @@ const eventRouter = express.Router();
 //use routers
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter)
+
 //for authRouter
 const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcrypt');
+
+//USER Endpoints----------------------------------------------------------------
 // Registration endpoint
 authRouter.post('/register', async (req, res, next) => {
   try{
@@ -84,7 +88,6 @@ authRouter.post('/register', async (req, res, next) => {
   }
 });
 
-
 //checks if user is already logged in
 authRouter.get('/session', (req, res) => {
   if (req.isAuthenticated()) {
@@ -95,6 +98,7 @@ authRouter.get('/session', (req, res) => {
   }
 });
 
+//login user
 authRouter.post('/login', (req, res, next) => {
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
@@ -132,6 +136,7 @@ authRouter.post('/login', (req, res, next) => {
   })(req, res, next);
 });
 
+//logout user
 authRouter.post('/logout', async (req, res, next) => {
   if (!req.isAuthenticated()) {
     return res.status(403).json({ message: 'Not logged in' });
@@ -157,52 +162,8 @@ authRouter.post('/logout', async (req, res, next) => {
     return next(error); // Pass the error to the error handling middleware
   }
 });
-authRouter.post('/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  const user = await findUserByEmail(email);
 
-  if (!user) {
-    return res.status(404).json({ message: 'No user found with that email.' });
-  }
-
-  // Generate a password reset token
-  const resetToken = crypto.randomBytes(32).toString('hex');
-  const hash = await bcrypt.hash(resetToken, Number(process.env.BCRYPT_SALT_ROUNDS));
-
-  // Token expires in one hour
-  const expireTime = new Date(Date.now() + 3600000); // 1 hour in milliseconds
-
-  // Save the token and expiration to the database
-  await setPasswordResetToken(user.email, hash, expireTime);
-
-  // Send email to the user with the reset link
-  // You'll need to set up nodemailer or another email service provider
-  sendPasswordResetEmail(user.email, `http://localhost:3000/reset-password/${resetToken}`);
-
-  res.json({ message: 'Please check your email for the password reset link.' });
-});
-
-authRouter.post('/reset-password/:token', async (req, res) => {
-  const { token } = req.params;
-  const { password } = req.body;
-
-  // Check if the token is valid and not expired
-  const user = await findUserByResetToken(token);
-
-  if (!user) {
-    return res.status(400).json({ message: 'Invalid or expired password reset token.' });
-  }
-
-  // Hash the new password and save it
-  const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS));
-  await resetPassword(token, hashedPassword);
-
-  // Clear the reset token and expiration from the database
-  await clearUserResetToken(user.id);
-
-  res.json({ message: 'Password reset successfully. You can now login with your new password.' });
-});
-
+//get all users
 authRouter.get('/users', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) { // Ensure isAdmin logic matches your setup
     return res.status(403).json({ message: 'Not authorized' });
@@ -217,6 +178,88 @@ authRouter.get('/users', async (req, res) => {
   }
 });
 
+//forgot password reset link sent to user email
+authRouter.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  const user = await findUserByEmail(email);
+
+  if (!user) {
+    return res.status(404).json({ message: 'No user found with that email.' });
+  }
+  // Generate a password reset token
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const hash = await bcrypt.hash(resetToken, Number(process.env.BCRYPT_SALT_ROUNDS));
+
+  // Token expires in one hour
+  const expireTime = new Date(Date.now() + 3600000); // 1 hour in milliseconds
+
+  // Save the token and expiration to the database
+  await setPasswordResetToken(user.id, hash, expireTime);
+
+  // Send email to the user with the reset link
+ try {
+    await sendPasswordResetEmail(user.email, resetToken);
+    res.json({ message: 'Please check your email for the password reset link.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error sending password reset email.' });
+  }
+});
+
+//actually reset's password
+authRouter.post('/reset-password/:token', async (req, res) => {
+  const { email, password } = req.body;
+  
+  // Check if the token is valid and not expired
+  const user = await findUserByEmail(email);
+  const savedHash = user.reset_token; // The hash stored in the database
+  const { token } = req.params;
+
+
+  authRouter.post('/reset-password/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { email, password } = req.body;
+
+    // Check if the token is valid and not expired
+    const user = await findUserByEmail(email);
+
+    if (!user || new Date() > new Date(user.reset_token_expires)) {
+      return res.status(400).json({ message: 'Invalid or expired password reset token.' });
+    }
+
+    // Use bcrypt.compare with async/await
+    const isMatch = await bcrypt.compare(token, user.reset_token);
+
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid or expired password reset token.' });
+    }
+
+    // Hash the new password and save it
+    const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS));
+    await resetPassword(user.id, hashedPassword);
+
+    // Clear the reset token and expiration from the database
+    await clearUserResetToken(user.id);
+
+    res.json({ message: 'Password reset successfully. You can now login with your new password.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error resetting password.' });
+  }
+});
+
+
+  // Hash the new password and save it
+  const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS));
+  await resetPassword(user.id, hashedPassword);
+
+  // Clear the reset token and expiration from the database
+  await clearUserResetToken(user.id);
+
+  res.json({ message: 'Password reset successfully. You can now login with your new password.' });
+});
+
+//change admin status
 authRouter.patch('/setAdmin/:userId', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {
     return res.status(403).json({ message: 'Not authorized' });
@@ -237,9 +280,9 @@ authRouter.patch('/setAdmin/:userId', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+//EVENT Endpoints-----------------------------------------------------
 
-
-//EVENT Endpoints
+//Submit event
 eventRouter.post('/submit', async (req, res) => {
   // Ensure the user is authenticated
 
@@ -283,7 +326,8 @@ eventRouter.put('/review/:eventId', async (req, res) => {
     res.status(500).json({ message: 'Internal server error.' });
   }
 });
-//edit event data.
+
+//edit/update event data.
 eventRouter.put('/:eventId', async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
@@ -305,6 +349,7 @@ eventRouter.put('/:eventId', async (req, res) => {
   }
 });
 
+//GET Single Event
 eventRouter.get('/:eventId', async function(req, res) {
   const { eventId } = req.params;
   try {
@@ -316,6 +361,7 @@ eventRouter.get('/:eventId', async function(req, res) {
   }
 })
 
+// GET All Events
 eventRouter.get('/', async (req, res) => {
   try {
     const events = await getAllEvents(); 
