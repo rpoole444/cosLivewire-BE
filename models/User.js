@@ -28,8 +28,6 @@ const createUser = async ({
   return newUser;
 };
 
-
-
 const updateUserLoginStatus = async (userId, isLoggedIn) => {
   if(userId === undefined){
     throw new Error('UserId is Undefied')
@@ -39,12 +37,14 @@ const updateUserLoginStatus = async (userId, isLoggedIn) => {
     .update({ is_logged_in: isLoggedIn })
     .returning('*');
 }
+
 const updateUserAdminStatus = (userId, isAdmin) => {
   return knex('users')
     .where({ id:userId })
     .update({ is_admin: isAdmin })
     .returning('*');
 };
+
 const findUserByEmail = (email) => {
   return knex('users').where({ email }).first();
 }
