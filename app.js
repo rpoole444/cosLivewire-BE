@@ -7,7 +7,7 @@ const passport = require('passport');
 const initializePassport = require('./passport-config')
 const { sendPasswordResetEmail,} = require("./models/mailer")
 const { findUserByResetToken, resetPassword, clearUserResetToken, setPasswordResetToken, updateUserLoginStatus, getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
-const { findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
+const { deleteEvent, findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
 
 const app = express();
 app.use(cors({
@@ -371,6 +371,29 @@ eventRouter.get('/', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// DELETE event by ID
+eventRouter.delete('/:eventId', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  const { eventId } = req.params;
+
+  try {
+    const deleteResult = await deleteEvent(eventId); // Implement this function to delete the event from the database
+
+    if (deleteResult) { // If the result is truthy, the delete operation was successful
+      res.status(204).send(); // 204 No Content is appropriate for a successful delete with no response body
+    } else {
+      res.status(404).json({ message: 'Event not found' }); // If the event was not found or no rows were deleted
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 
 app.get('/', (req, res) => res.send('Hello World!'));
 

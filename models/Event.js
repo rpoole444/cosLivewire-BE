@@ -33,11 +33,19 @@ const updateEvent = async(eventId, eventData) => {
 const findEventById = (eventId) => {
   return knex('events').where({ id: eventId }).first();
 }
+
+const deleteEvent = async (eventId) => {
+  return knex('events')
+    .where({ id: eventId })
+    .del(); // This will delete the event
+};
+
 module.exports = {
   updateEvent,
   createEvent,
   getEventsForReview,
   updateEventStatus,
   getAllEvents,
-  findEventById
+  findEventById,
+  deleteEvent
 };
