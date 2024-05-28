@@ -40,9 +40,13 @@ const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcrypt');
 
 //USER Endpoints----------------------------------------------------------------
-// Registration endpoint
+const validatePassword = (password) => {
+  const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+  return passwordRegex.test(password);
+};
+//user registration
 authRouter.post('/register', async (req, res, next) => {
-  try{
+  try {
     const { 
       first_name, 
       last_name, 
@@ -51,16 +55,22 @@ authRouter.post('/register', async (req, res, next) => {
       user_description, 
       top_music_genres,
     } = req.body;
-    if(!first_name || !last_name || !email || !password){
-      return res.status(400).json({error: 'Please provide an email and password'});
+    
+    if (!first_name || !last_name || !email || !password) {
+      return res.status(400).json({ error: 'Please provide an email and password' });
     }
 
-    const existingUser = await findUserByEmail(email);
-    if(existingUser){
-      return res.status(400).json({error: 'User already exists'});
+    if (!validatePassword(password)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long and include a mix of uppercase letters, lowercase letters, numbers, and special characters.' });
     }
 
-    // Check if topMusicGenres is already an array or a string, and handle accordingly
+    const normalizedEmail = email.toLowerCase();
+
+    const existingUser = await findUserByEmail(normalizedEmail);
+    if (existingUser) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
     const genres = Array.isArray(top_music_genres) 
       ? top_music_genres.slice(0, 3) 
       : typeof top_music_genres === 'string'
@@ -70,7 +80,7 @@ authRouter.post('/register', async (req, res, next) => {
     const newUser = await createUser({
       firstName: first_name,
       lastName: last_name,
-      email,
+      email: normalizedEmail,
       password,
       userDescription: user_description,
       topMusicGenres: genres,
@@ -78,7 +88,7 @@ authRouter.post('/register', async (req, res, next) => {
 
     const { password: _, ...userWithoutPassword } = newUser;
 
-     res.status(201).json({ 
+    res.status(201).json({ 
       message: 'User created successfully',
       user: userWithoutPassword,
     });
@@ -98,21 +108,27 @@ authRouter.get('/session', (req, res) => {
   }
 });
 
-//login user
+// login user
 authRouter.post('/login', (req, res, next) => {
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
       return next(err);
     }
     if (!user) {
-      return res.status(401).json({ message: info.message });
+      // Determine the specific error and send appropriate message
+      if (info.message === 'Incorrect username.') {
+        return res.status(401).json({ message: 'Email not registered.' });
+      }
+      if (info.message === 'Incorrect password.') {
+        return res.status(401).json({ message: 'Incorrect password.' });
+      }
+      return res.status(401).json({ message: 'Login failed.' });
     }
     req.logIn(user, async (err) => {
       if (err) {
         return next(err);
       }
-   try {
-        // Update the is_logged_in property to true upon successful login
+      try {
         await updateUserLoginStatus(user.id, true);
         return res.json({
           message: 'Logged in successfully',
@@ -122,19 +138,19 @@ authRouter.post('/login', (req, res, next) => {
             last_name: user.last_name, 
             email: user.email, 
             is_logged_in: user.is_logged_in, 
-            is_admin:user.is_admin,
+            is_admin: user.is_admin,
             top_music_genres: user.top_music_genres,
             user_description: user.user_description,
-           }
+          }
         });
       } catch (updateError) {
         console.error(updateError);
-        // Handle error, possibly sending back a 500 server error response
         return next(updateError);
       }
     });
   })(req, res, next);
 });
+
 
 //logout user
 authRouter.post('/logout', async (req, res, next) => {
