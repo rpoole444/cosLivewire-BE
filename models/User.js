@@ -28,9 +28,18 @@ const createUser = async ({
   return newUser;
 };
 
+const updateUser = async (id, userData) => {
+  // Assuming you're using Knex.js
+  const [updatedUser] = await knex('users')
+    .where({ id })
+    .update(userData)
+    .returning('*');
+
+  return updatedUser;
+};
 const updateUserLoginStatus = async (userId, isLoggedIn) => {
   if(userId === undefined){
-    throw new Error('UserId is Undefied')
+    throw new Error('UserId is Undefined')
   }
   return knex('users')
     .where({ id:userId })
@@ -102,5 +111,6 @@ module.exports = {
   setPasswordResetToken,
   findUserByResetToken,
   resetPassword,
-  clearUserResetToken
+  clearUserResetToken,
+  updateUser,
 }
