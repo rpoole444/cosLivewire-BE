@@ -6,7 +6,7 @@ const session = require('express-session');
 const passport = require('passport');
 const initializePassport = require('./passport-config')
 const { sendPasswordResetEmail,} = require("./models/mailer")
-const { findUserByResetToken, resetPassword, clearUserResetToken, setPasswordResetToken, updateUserLoginStatus, getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById } = require('./models/User');
+const { findUserByResetToken, resetPassword, clearUserResetToken, setPasswordResetToken, updateUserLoginStatus, getAllUsers, updateUserAdminStatus, createUser, findUserByEmail, findUserById, updateUser } = require('./models/User');
 const { deleteEvent, findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('./models/Event');
 
 const app = express();
@@ -47,15 +47,8 @@ const validatePassword = (password) => {
 //user registration
 authRouter.post('/register', async (req, res, next) => {
   try {
-    const { 
-      first_name, 
-      last_name, 
-      email, 
-      password, 
-      user_description, 
-      top_music_genres,
-    } = req.body;
-    
+    const { first_name, last_name, email, password, user_description, top_music_genres } = req.body;
+
     if (!first_name || !last_name || !email || !password) {
       return res.status(400).json({ error: 'Please provide an email and password' });
     }
@@ -65,8 +58,8 @@ authRouter.post('/register', async (req, res, next) => {
     }
 
     const normalizedEmail = email.toLowerCase();
-
     const existingUser = await findUserByEmail(normalizedEmail);
+
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
     }
@@ -74,7 +67,7 @@ authRouter.post('/register', async (req, res, next) => {
     const genres = Array.isArray(top_music_genres) 
       ? top_music_genres.slice(0, 3) 
       : typeof top_music_genres === 'string'
-      ? top_music_genres.split(',').slice(0, 3) 
+      ? top_music_genres.split(',').slice(0, 3)
       : [];
 
     const newUser = await createUser({
@@ -97,6 +90,42 @@ authRouter.post('/register', async (req, res, next) => {
     res.status(500).json({ error: 'An error occurred while creating the user' });
   }
 });
+
+// Update user profile
+authRouter.put('/update-profile', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  const { first_name, last_name, email, user_description, top_music_genres } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const genres = Array.isArray(top_music_genres)
+      ? top_music_genres.slice(0, 3)
+      : typeof top_music_genres === 'string'
+      ? top_music_genres.split(',').slice(0, 3)
+      : [];
+
+    const updatedUser = await updateUser(userId, {
+      first_name,
+      last_name,
+      email,
+      user_description,
+      top_music_genres: genres,
+    });
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+
 
 //checks if user is already logged in
 authRouter.get('/session', (req, res) => {
