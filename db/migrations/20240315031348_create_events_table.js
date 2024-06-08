@@ -11,6 +11,9 @@ exports.up = function(knex) {
     table.string('age_restriction').nullable();
     table.string('website_link').nullable();
     table.boolean('is_approved').defaultTo(false);
+    table.string('address');
+    table.string('venue_name'); // Add this line
+    table.string('website'); // Add this line
     table.timestamps(true, true);
   })
 };
