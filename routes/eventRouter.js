@@ -1,18 +1,67 @@
 const express = require('express');
 const { deleteEvent, findEventById, createEvent, getAllEvents, getEventsForReview, updateEventStatus, updateEvent } = require('../models/Event');
+const multer = require('multer');
+const multerS3 = require('multer-s3');
+const { S3Client } = require('@aws-sdk/client-s3');
+const { fromEnv } = require('@aws-sdk/credential-provider-env');
+
+// Configure AWS SDK v3
+const s3 = new S3Client({
+  credentials: fromEnv(),
+  region: process.env.AWS_REGION,
+});
+
+const upload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.AWS_S3_BUCKET_NAME,
+    metadata: (req, file, cb) => {
+      cb(null, { fieldName: file.fieldname });
+    },
+    key: (req, file, cb) => {
+      cb(null, `${Date.now().toString()}-${file.originalname}`);
+    },
+  }),
+});
 
 const eventRouter = express.Router();
 
 // Submit event
-eventRouter.post('/submit', async (req, res) => {
+eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
   try {
+    const {
+      user_id,
+      title,
+      description,
+      location,
+      address,
+      date,
+      genre,
+      ticket_price,
+      age_restriction,
+      website_link,
+      venue_name,
+      website,
+    } = req.body;
+
     const eventData = {
-      ...req.body,
-      user_id: req.user.id
+      user_id,
+      title,
+      description,
+      location,
+      address,
+      date,
+      genre,
+      ticket_price,
+      age_restriction,
+      website_link,
+      venue_name,
+      website,
+      poster: req.file ? req.file.location : null, // Save the S3 URL if a file is uploaded
     };
 
     const event = await createEvent(eventData);
@@ -65,7 +114,7 @@ eventRouter.put('/:eventId', async (req, res) => {
     res.json({ event: updatedEvent[0], message: 'Event updated successfully.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Internal server error.' });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
