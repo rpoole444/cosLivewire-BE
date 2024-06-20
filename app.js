@@ -5,6 +5,7 @@ const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
+// const bodyParser = require('body-parser');
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
@@ -18,7 +19,8 @@ app.use(cors({
 }));
 
 app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Set JSON limit
+// app.use(bodyParser.urlencoded({ limit: '50mb', extended: true })); // Set URL-encoded limit
 
 // Session setup
 app.use(session({
