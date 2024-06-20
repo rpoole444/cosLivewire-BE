@@ -14,6 +14,7 @@ exports.up = function(knex) {
     table.string('address');
     table.string('venue_name'); // Add this line
     table.string('website'); // Add this line
+    table.string('poster').nullable();
     table.timestamps(true, true);
   })
 };
