@@ -11,7 +11,8 @@ exports.up = function(knex) {
     table.datetime('reset_token_expires');
     table.specificType('approved_events', 'integer[]').defaultTo('{}'); // Adjust type as needed
     table.string('user_description');
-    table.text('top_music_genres','[]') 
+    table.text('top_music_genres','[]');
+    table.string('profile_picture').nullable();
     table.timestamps(true, true);
   })
 };
