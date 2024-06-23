@@ -2,10 +2,33 @@ const express = require('express');
 const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcrypt');
 const passport = require('passport');
+const { S3Client } = require('@aws-sdk/client-s3');
+const { fromEnv } = require('@aws-sdk/credential-provider-env');
+const multer = require('multer');
+const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
-const { findUserByEmail, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus } = require('../models/User');
+const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus } = require('../models/User');
 
 const authRouter = express.Router();
+
+const s3 = new S3Client({
+  credentials: fromEnv(),
+  region: process.env.AWS_REGION,
+});
+
+const upload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.AWS_S3_BUCKET_NAME,
+    metadata: (req, file, cb) => {
+      cb(null, { fieldName: file.fieldname });
+    },
+    key: (req, file, cb) => {
+      cb(null, `profile-pictures/${Date.now().toString()}-${file.originalname}`);
+    },
+  }),
+});
+
 
 // Validate password function
 const validatePassword = (password) => {
@@ -62,21 +85,27 @@ authRouter.post('/register', async (req, res, next) => {
   }
 });
 
-// Update user profile
-authRouter.put('/update-profile', async (req, res) => {
+// Update user profile route
+authRouter.put('/update-profile', upload.single('profile_picture'), async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
-  const { first_name, last_name, email, user_description, top_music_genres } = req.body;
   const userId = req.user.id;
+  const { first_name, last_name, email, user_description, top_music_genres } = req.body;
+  const profilePictureUrl = req.file ? req.file.location : req.user.profile_picture;
 
   try {
-    const genres = Array.isArray(top_music_genres)
+        const genres = Array.isArray(top_music_genres)
       ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
       ? top_music_genres.split(',').slice(0, 3)
       : [];
+
+    if (req.file && req.user.profile_picture) {
+      const oldKey = req.user.profile_picture.split('/').pop(); // Extract the file key from URL
+      await deleteProfilePicture(oldKey);
+    }
 
     const updatedUser = await updateUser(userId, {
       first_name,
@@ -84,17 +113,16 @@ authRouter.put('/update-profile', async (req, res) => {
       email,
       user_description,
       top_music_genres: genres,
+      profile_picture: profilePictureUrl, // Ensure profile picture URL is updated
     });
 
-    res.json({
-      message: 'Profile updated successfully',
-      user: updatedUser,
-    });
+    res.json({ message: 'Profile updated successfully', profile_picture_url: updatedUser.profile_picture });
   } catch (error) {
-    console.error(error);
+    console.error('Error updating profile:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 // Checks if user is already logged in
 authRouter.get('/session', (req, res) => {
