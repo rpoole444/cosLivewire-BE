@@ -2,7 +2,14 @@ const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
 const bcrypt = require('bcrypt');
+const { S3Client, DeleteObjectCommand, GetObjectCommand  } = require('@aws-sdk/client-s3');
+const { fromEnv } = require('@aws-sdk/credential-provider-env');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
+const s3 = new S3Client({
+  credentials: fromEnv(),
+  region: process.env.AWS_REGION,
+});
 
 const createUser = async ({
   firstName,
@@ -28,14 +35,42 @@ const createUser = async ({
   return newUser;
 };
 
-const updateUser = async (id, userData) => {
-  // Assuming you're using Knex.js
+const updateUser = async (id, userData, profilePictureUrl) => {
   const [updatedUser] = await knex('users')
     .where({ id })
-    .update(userData)
+    .update({ ...userData, profile_picture: profilePictureUrl })
     .returning('*');
-
   return updatedUser;
+};
+
+const updateUserProfilePicture = async (id, profilePictureUrl) => {
+  const [updatedUser] = await knex('users')
+    .where({ id })
+    .update({ profile_picture: profilePictureUrl })
+    .returning('*');
+  return updatedUser;
+};
+
+const deleteProfilePicture = async (key) => {
+  try {
+    const deleteParams = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key,
+    };
+    await s3.send(new DeleteObjectCommand(deleteParams));
+  } catch (error) {
+    console.error("Error deleting profile picture:", error);
+    throw new Error("Could not delete profile picture");
+  }
+};
+
+const getProfilePictureUrl = async (key) => {
+  const command = new GetObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+  });
+  const url = await getSignedUrl(s3, command, { expiresIn: 3600 }); // URL expires in 1 hour
+  return url;
 };
 const updateUserLoginStatus = async (userId, isLoggedIn) => {
   if(userId === undefined){
@@ -113,4 +148,7 @@ module.exports = {
   resetPassword,
   clearUserResetToken,
   updateUser,
+  updateUserProfilePicture,
+  deleteProfilePicture,
+  getProfilePictureUrl,
 }
