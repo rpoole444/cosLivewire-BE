@@ -138,13 +138,11 @@ authRouter.get('/profile-picture', async (req, res) => {
 
   try {
     const user = await findUserById(userId);
-    console.log(user);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
     const profilePictureUrl = user.profile_picture;
-    console.log(profilePictureUrl);
     res.json({ profile_picture_url: profilePictureUrl });
   } catch (error) {
     console.error('Error fetching profile picture:', error);
