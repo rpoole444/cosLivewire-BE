@@ -7,7 +7,7 @@ const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
-const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus } = require('../models/User');
+const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus } = require('../models/User');
 
 const authRouter = express.Router();
 
@@ -24,7 +24,8 @@ const upload = multer({
       cb(null, { fieldName: file.fieldname });
     },
     key: (req, file, cb) => {
-      cb(null, `profile-pictures/${Date.now().toString()}-${file.originalname}`);
+      const fileName = `profile-pictures/${Date.now().toString()}-${file.originalname}`;
+      cb(null, fileName);
     },
   }),
 });
@@ -93,10 +94,10 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
 
   const userId = req.user.id;
   const { first_name, last_name, email, user_description, top_music_genres } = req.body;
-  const profilePictureUrl = req.file ? req.file.location : req.user.profile_picture;
+  const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : req.user.profile_picture;
 
   try {
-        const genres = Array.isArray(top_music_genres)
+    const genres = Array.isArray(top_music_genres)
       ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
       ? top_music_genres.split(',').slice(0, 3)
@@ -112,18 +113,44 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
       last_name,
       email,
       user_description,
-      top_music_genres: genres,
-      profile_picture: profilePictureUrl, // Ensure profile picture URL is updated
-    });
+      top_music_genres: JSON.stringify(genres), 
+    }, profilePictureUrl);
 
-    res.json({ message: 'Profile updated successfully', profile_picture_url: updatedUser.profile_picture });
+    res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
   } catch (error) {
     console.error('Error updating profile:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
 
+  res.status(200).json({ imageUrl: req.file.location });
+});
+authRouter.get('/profile-picture', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
 
+  const userId = req.user.id;
+
+  try {
+    const user = await findUserById(userId);
+    console.log(user);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const profilePictureUrl = user.profile_picture;
+    console.log(profilePictureUrl);
+    res.json({ profile_picture_url: profilePictureUrl });
+  } catch (error) {
+    console.error('Error fetching profile picture:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 // Checks if user is already logged in
 authRouter.get('/session', (req, res) => {
   if (req.isAuthenticated()) {
