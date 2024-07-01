@@ -57,8 +57,8 @@ authRouter.post('/register', async (req, res, next) => {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    const genres = Array.isArray(top_music_genres) 
-      ? top_music_genres.slice(0, 3) 
+    const genres = Array.isArray(top_music_genres)
+      ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
       ? top_music_genres.split(',').slice(0, 3)
       : [];
@@ -73,7 +73,7 @@ authRouter.post('/register', async (req, res, next) => {
     });
 
     const { password: _, ...userWithoutPassword } = newUser;
-    
+
     await sendRegistrationEmail(normalizedEmail, first_name, last_name);
 
     res.status(201).json({ 
@@ -104,7 +104,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
       : [];
 
     if (req.file && req.user.profile_picture) {
-      const oldKey = req.user.profile_picture.split('/').pop(); // Extract the file key from URL
+      const oldKey = req.user.profile_picture.split('/').pop();
       await deleteProfilePicture(oldKey);
     }
 
@@ -113,7 +113,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
       last_name,
       email,
       user_description,
-      top_music_genres: JSON.stringify(genres), 
+      top_music_genres: genres,
     }, profilePictureUrl);
 
     res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
@@ -122,6 +122,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
@@ -162,7 +163,7 @@ authRouter.get('/session', (req, res) => {
 authRouter.post('/login', (req, res, next) => {
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
-      return next(err);
+      return res.status(500).json({ message: 'Internal server error' });
     }
     if (!user) {
       if (info.message === 'Incorrect username.') {
@@ -175,7 +176,7 @@ authRouter.post('/login', (req, res, next) => {
     }
     req.logIn(user, async (err) => {
       if (err) {
-        return next(err);
+        return res.status(500).json({ message: 'Internal server error' });
       }
       try {
         await updateUserLoginStatus(user.id, true);
@@ -194,7 +195,7 @@ authRouter.post('/login', (req, res, next) => {
         });
       } catch (updateError) {
         console.error(updateError);
-        return next(updateError);
+        return res.status(500).json({ message: 'Internal server error' });
       }
     });
   })(req, res, next);

@@ -38,7 +38,10 @@ const createUser = async ({
 const updateUser = async (id, userData, profilePictureUrl) => {
   const [updatedUser] = await knex('users')
     .where({ id })
-    .update({ ...userData, profile_picture: profilePictureUrl })
+    .update({ 
+      ...userData, 
+      profile_picture: profilePictureUrl,
+    top_music_genres: JSON.stringify(userData.top_music_genres)})
     .returning('*');
   return updatedUser;
 };
