@@ -36,12 +36,17 @@ const createUser = async ({
 };
 
 const updateUser = async (id, userData, profilePictureUrl) => {
+  const genres = Array.isArray(userData.top_music_genres)
+    ? userData.top_music_genres
+    : JSON.parse(userData.top_music_genres); // Ensure it's an array
+
   const [updatedUser] = await knex('users')
     .where({ id })
     .update({ 
       ...userData, 
       profile_picture: profilePictureUrl,
-    top_music_genres: JSON.stringify(userData.top_music_genres)})
+      top_music_genres: JSON.stringify(genres), // Save as JSON string
+    })
     .returning('*');
   return updatedUser;
 };
