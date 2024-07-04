@@ -116,15 +116,6 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
       top_music_genres: JSON.stringify(genres), // Save as JSON string
     }, profilePictureUrl);
 
-    console.log('Updating user with data:', {
-      first_name,
-      last_name,
-      email,
-      user_description,
-      top_music_genres: genres,
-    });
-    console.log('Updated user:', updatedUser);
-
     res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
   } catch (error) {
     console.error('Error updating profile:', error);
