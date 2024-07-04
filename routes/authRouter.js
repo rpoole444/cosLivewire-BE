@@ -60,7 +60,7 @@ authRouter.post('/register', async (req, res, next) => {
     const genres = Array.isArray(top_music_genres)
       ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
-      ? top_music_genres.split(',').slice(0, 3)
+      ? JSON.parse(top_music_genres).slice(0, 3)
       : [];
 
     const newUser = await createUser({
@@ -69,7 +69,7 @@ authRouter.post('/register', async (req, res, next) => {
       email: normalizedEmail,
       password,
       userDescription: user_description,
-      topMusicGenres: genres,
+      topMusicGenres: genres, // Save as array
     });
 
     const { password: _, ...userWithoutPassword } = newUser;
@@ -100,7 +100,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
     const genres = Array.isArray(top_music_genres)
       ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
-      ? top_music_genres.split(',').slice(0, 3)
+      ? JSON.parse(top_music_genres).slice(0, 3)
       : [];
 
     if (req.file && req.user.profile_picture) {
@@ -113,8 +113,17 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
       last_name,
       email,
       user_description,
-      top_music_genres: genres,
+      top_music_genres: JSON.stringify(genres), // Save as JSON string
     }, profilePictureUrl);
+
+    console.log('Updating user with data:', {
+      first_name,
+      last_name,
+      email,
+      user_description,
+      top_music_genres: genres,
+    });
+    console.log('Updated user:', updatedUser);
 
     res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
   } catch (error) {
