@@ -46,6 +46,8 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website_link,
       venue_name,
       website,
+      start_time,
+      end_time
     } = req.body;
 
     const eventData = {
@@ -61,6 +63,8 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website_link,
       venue_name,
       website,
+      start_time,
+      end_time,
       poster: req.file ? req.file.location : null, // Save the S3 URL if a file is uploaded
     };
 

@@ -15,6 +15,8 @@ exports.up = function(knex) {
     table.string('venue_name'); // Add this line
     table.string('website'); // Add this line
     table.string('poster').nullable();
+    table.time('start_time').notNullable();
+    table.time('end_time').notNullable();
     table.timestamps(true, true);
   })
 };
