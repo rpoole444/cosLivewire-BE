@@ -40,6 +40,11 @@ app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // Ensure cookies are secure in production
+    httpOnly: true,
+    sameSite: 'lax' // Adjust based on your needs (strict/lax/none)
+  }
 }));
 
 // Passport middleware
