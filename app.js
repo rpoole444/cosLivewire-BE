@@ -13,10 +13,20 @@ const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
 
-// const allowedOrigins = process.env.NODE_ENV === 'production' ? ['https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/'] : ['http://localhost:3001'];
+const allowedOrigins = [
+  'http://localhost:3000', // Local development
+  'http://localhost:3001', // Another local development port
+  'https://alpine-groove-guide.vercel.app' // Vercel deployment
+];
 app.use(cors({
-   origin: 'https://alpine-groove-guide.vercel.app/', // Replace this with your frontend URL
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed methods
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
