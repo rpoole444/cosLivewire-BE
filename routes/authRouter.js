@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto'); // Node.js built-in module
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const passport = require('passport');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
