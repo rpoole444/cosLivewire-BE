@@ -41,16 +41,18 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production', // Only set to true in production
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' // Adjust based on your needs
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Adjust based on your needs
+    httpOnly: true, // Prevents JavaScript from accessing cookies
   }
 }));
+
+initializePassport(passport, findUserByEmail, findUserById);
 
 // Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
 // Initialize Passport
-initializePassport(passport, findUserByEmail, findUserById);
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
@@ -60,20 +62,6 @@ app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter);
 
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
-
-// Middleware to protect routes
-function ensureAuthenticated(req, res, next) {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.status(401).json({ message: 'Unauthorized' });
-}
-
-// Example of a protected route
-app.get('/api/auth/profile-picture', ensureAuthenticated, (req, res) => {
-  const user = req.user; // Assuming user is attached to the request
-  res.json({ profile_picture_url: user.profile_picture_url });
-});
 
 // Error handling middleware should be the last piece of middleware added to the app
 app.use((err, req, res, next) => {

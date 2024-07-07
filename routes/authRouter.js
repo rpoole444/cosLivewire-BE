@@ -30,7 +30,12 @@ const upload = multer({
   }),
 });
 
-
+function ensureAuthenticated(req, res, next) {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  res.status(401).json({ message: 'Unauthorized' });
+}
 // Validate password function
 const validatePassword = (password) => {
   const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
@@ -130,7 +135,7 @@ authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req
 
   res.status(200).json({ imageUrl: req.file.location });
 });
-authRouter.get('/profile-picture', async (req, res) => {
+authRouter.get('/profile-picture', ensureAuthenticated, (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
@@ -138,7 +143,7 @@ authRouter.get('/profile-picture', async (req, res) => {
   const userId = req.user.id;
 
   try {
-    const user = await findUserById(userId);
+    const user = findUserById(userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
