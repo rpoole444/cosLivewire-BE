@@ -44,7 +44,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter);
 
-app.get('/', (req, res) => res.send('Hello World!'));
+app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
 // Error handling middleware should be the last piece of middleware added to the app
 app.use((err, req, res, next) => {
