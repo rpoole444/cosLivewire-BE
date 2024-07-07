@@ -15,7 +15,7 @@ const app = express();
 
 // const allowedOrigins = process.env.NODE_ENV === 'production' ? ['https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/'] : ['http://localhost:3001'];
 app.use(cors({
-   origin: 'https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/', // Replace this with your frontend URL
+   origin: 'https://alpine-groove-guide.vercel.app/', // Replace this with your frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed methods
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
