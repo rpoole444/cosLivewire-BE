@@ -69,9 +69,12 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     };
 
     const event = await createEvent(eventData);
+    console.log("Event submitted", event);
     res.status(201).json({ event: event[0], message: 'Event submitted successfully.' });
   } catch (error) {
     console.error(error);
+    console.error('Error submitting event:', error);
+
     res.status(500).json({ message: 'Internal server error.' });
   }
 });

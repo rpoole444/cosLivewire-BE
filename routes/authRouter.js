@@ -135,26 +135,31 @@ authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req
 
   res.status(200).json({ imageUrl: req.file.location });
 });
-authRouter.get('/profile-picture', ensureAuthenticated, (req, res) => {
+authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
+  console.log("Profile picture route hit");
   if (!req.isAuthenticated()) {
+    console.warn("User not authenticated");
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
   const userId = req.user.id;
 
   try {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     if (!user) {
+      console.warn("User not found", userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
     const profilePictureUrl = user.profile_picture;
+    console.log("Profile picture retrieved", profilePictureUrl);
     res.json({ profile_picture_url: profilePictureUrl });
   } catch (error) {
     console.error('Error fetching profile picture:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 // Checks if user is already logged in
 authRouter.get('/session', (req, res) => {
   if (req.isAuthenticated()) {
@@ -171,6 +176,7 @@ authRouter.post('/login', (req, res, next) => {
       return res.status(500).json({ message: 'Internal server error' });
     }
     if (!user) {
+      console.warn("Authentication failed", info.message);
       if (info.message === 'Incorrect username.') {
         return res.status(401).json({ message: 'Email not registered.' });
       }
@@ -181,10 +187,13 @@ authRouter.post('/login', (req, res, next) => {
     }
     req.logIn(user, async (err) => {
       if (err) {
+        console.error("Error during login", err);
         return res.status(500).json({ message: 'Internal server error' });
       }
       try {
         await updateUserLoginStatus(user.id, true);
+        console.log("User logged in", user);
+
         return res.json({
           message: 'Logged in successfully',
           user: { 

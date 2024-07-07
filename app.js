@@ -46,11 +46,11 @@ app.use(session({
   }
 }));
 
-initializePassport(passport, findUserByEmail, findUserById);
 
 // Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
+initializePassport(passport, findUserByEmail, findUserById);
 
 // Initialize Passport
 
