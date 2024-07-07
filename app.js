@@ -27,7 +27,7 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
@@ -40,11 +40,12 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Only set to true in production
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Adjust based on your needs
-    httpOnly: true, // Prevents JavaScript from accessing cookies
-  }
+    httpOnly: true,
+    secure: true, // Set to true if using https
+    sameSite: 'None', // Important for cross-site cookie
+  },
 }));
+
 
 
 // Passport middleware
