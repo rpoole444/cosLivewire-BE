@@ -8,7 +8,9 @@ module.exports = {
       port: 5432,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
+      database: process.env.DB_NAME,
+      ssl: false // for local development, set to false or remove
+
     },
     migrations: {
       directory: './db/migrations'
@@ -20,6 +22,9 @@ module.exports = {
   production: {
     client: 'postgresql',
     connection: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false
+      },
     migrations: {
       directory: './db/migrations',
       tableName: 'knex_migrations'
