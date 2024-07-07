@@ -13,8 +13,9 @@ const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
 
+const allowedOrigins = process.env.NODE_ENV === 'production' ? ['https://alpine-groove-guide-be-e5150870a33a.herokuapp.com'] : ['http://localhost:3001'];
 app.use(cors({
-  origin: 'http://localhost:3001',
+  origin: allowedOrigins,
   credentials: true,
 }));
 
