@@ -13,9 +13,11 @@ const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
 
-const allowedOrigins = process.env.NODE_ENV === 'production' ? ['https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/'] : ['http://localhost:3001'];
+// const allowedOrigins = process.env.NODE_ENV === 'production' ? ['https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/'] : ['http://localhost:3001'];
 app.use(cors({
-  origin: allowedOrigins,
+   origin: 'https://alpine-groove-guide-be-e5150870a33a.herokuapp.com/', // Replace this with your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed methods
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
@@ -52,7 +54,8 @@ app.use((err, req, res, next) => {
   res.status(500).send('Something broke!');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
+// const PORT = process.env.PORT || 3000;
+app.listen(process.env.PORT || 3000, () => {
+  console.log(`Server running on port ${process.env.PORT || 3000}`);
+});
 module.exports = app;
