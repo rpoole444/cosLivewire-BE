@@ -1,4 +1,3 @@
-// Update with your config settings.
 require('dotenv').config();
 
 module.exports = {
@@ -11,20 +10,20 @@ module.exports = {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       ssl: false // for local development, set to false or remove
-
     },
     migrations: {
       directory: './db/migrations'
     },
     seeds: {
       directory: './db/seeds'
-    }
+    },
+    debug: true
   },
   production: {
     client: 'postgresql',
     connection: {
-    connectionString: process.env.POSTGRES_URL,
-      ssl: { rejectUnauthorized: false } // Add this line
+      connectionString: `${process.env.POSTGRES_URL}?sslmode=require`,
+      ssl: { rejectUnauthorized: false }
     },
     migrations: {
       tableName: 'knex_migrations',
@@ -32,6 +31,7 @@ module.exports = {
     },
     seeds: {
       directory: './db/seeds'
-    }
+    },
+    debug: true
   }
 };
