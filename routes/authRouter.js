@@ -135,24 +135,18 @@ authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req
 
   res.status(200).json({ imageUrl: req.file.location });
 });
-authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
-  console.log("Profile picture route hit");
-  if (!req.isAuthenticated()) {
-    console.warn("User not authenticated");
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
 
+authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
+  console.log('Fetching profile picture for user:', req.user);
   const userId = req.user.id;
 
   try {
     const user = await findUserById(userId);
     if (!user) {
-      console.warn("User not found", userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
     const profilePictureUrl = user.profile_picture;
-    console.log("Profile picture retrieved", profilePictureUrl);
     res.json({ profile_picture_url: profilePictureUrl });
   } catch (error) {
     console.error('Error fetching profile picture:', error);
@@ -171,8 +165,10 @@ authRouter.get('/session', (req, res) => {
 
 // Login user
 authRouter.post('/login', (req, res, next) => {
+  console.log('Login attempt:', req.body);
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
+      console.error('Passport error:', err);
       return res.status(500).json({ message: 'Internal server error' });
     }
     if (!user) {
@@ -190,11 +186,10 @@ authRouter.post('/login', (req, res, next) => {
         console.error("Error during login", err);
         return res.status(500).json({ message: 'Internal server error' });
       }
+      console.log('User logged in:', user);
       try {
         await updateUserLoginStatus(user.id, true);
-        console.log("User logged in", user);
-
-        return res.json({
+        res.json({
           message: 'Logged in successfully',
           user: { 
             id: user.id, 
