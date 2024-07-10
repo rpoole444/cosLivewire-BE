@@ -5,6 +5,7 @@ module.exports = {
   development: {
     client: 'postgresql',
     connection: {
+      host: 'localhost',
       port: 5432,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
@@ -22,7 +23,7 @@ module.exports = {
   production: {
     client: 'postgresql',
     connection: {
-    connection: process.env.POSTGRES_URL,
+    connectionString: process.env.POSTGRES_URL,
       ssl: { rejectUnauthorized: false } // Add this line
     },
     migrations: {
