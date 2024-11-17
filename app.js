@@ -44,7 +44,9 @@ app.use(session({
   cookie: {
     // httpOnly: true,
     secure: process.env.NODE_ENV === 'production', // Set to true if using https
-    sameSite: 'None', // Important for cross-site cookie
+    // sameSite: 'None', // Important for cross-site cookie
+    httpOnly: true,
+    sameSite: 'lax',
   },
 }));
 

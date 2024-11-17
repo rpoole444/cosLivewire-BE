@@ -26,6 +26,7 @@ const upload = multer({
 
 const eventRouter = express.Router();
 
+
 // Submit event
 eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
   if (!req.isAuthenticated()) {

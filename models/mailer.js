@@ -10,8 +10,8 @@ let transporter = nodemailer.createTransport({
 });
 
 const sendPasswordResetEmail = async (email, resetToken) => {
-  const resetPasswordUrl = `http://localhost:3000/resetPasswordRouter/${resetToken}`;
-  const logoUrl = 'http://localhost:3000/alpine_groove_guide_icon.png'; // Update with your actual server URL
+const resetPasswordUrl = `http://localhost:3001/reset-password/${resetToken}`;
+const logoUrl = 'http://localhost:3000/alpine_groove_guide_icon.png';
 
   let mailOptions = {
     from: process.env.EMAIL_USERNAME,
