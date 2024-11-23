@@ -32,6 +32,7 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pg": "^8.11.3",
+    "serverless-http": "^3.2.0",
     "sqlite3": "^5.1.7"
   }
 }
