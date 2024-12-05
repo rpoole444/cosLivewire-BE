@@ -22,13 +22,7 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: 'https://alpine-groove-guide.vercel.app', // Your frontend URL
   methods: ['GET', 'POST', 'PUT', 'PATCH','DELETE'],
   allowedHeaders: ['Content-Type'],
   credentials: true,
@@ -43,11 +37,9 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    // httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Set to true if using https
-    // sameSite: 'None', // Important for cross-site cookie
-    httpOnly: false,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'none',
   },
 }));
 
