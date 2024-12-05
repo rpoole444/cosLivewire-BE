@@ -13,6 +13,7 @@ const eventRouter = require('./routes/eventRouter');
 const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy
 
 const allowedOrigins = [
   'http://localhost:3000', // Local development
