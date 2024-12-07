@@ -7,7 +7,8 @@ const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
 const { createClient } = require('redis');
-const RedisStore = require('connect-redis').default; // Note the `.default` import
+const connectRedis = require('connect-redis')
+const RedisStore = connectRedis(session)
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
@@ -43,13 +44,12 @@ const redisClient = createClient({
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
-
 redisClient.connect().catch(console.error);
 
 // Session setup
 app.use(session({
   store: new RedisStore({ client: redisClient }),
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET|| 'keyboard cat',
   resave: false,
   saveUninitialized: false,
   cookie: {
