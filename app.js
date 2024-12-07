@@ -6,8 +6,8 @@ const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
-const redis = require('redis');
-const RedisStore = require('connect-redis')(session)
+const { createClient } = require('redis');
+const { RedisStore } = require('connect-redis');
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
@@ -23,7 +23,13 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: 'https://alpine-groove-guide.vercel.app', // Your frontend URL
+  origin: (origin, callback) => {
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH','DELETE'],
   allowedHeaders: ['Content-Type'],
   credentials: true,
@@ -32,16 +38,17 @@ app.use(cors({
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
 
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379',
+const redisClient = createClient({
+  url: process.env.REDIS_URL,
   legacyMode: true,
 });
 
-redisClient.on('error', (err) => {
-  console.error('Error connecting to Redis:', err);
-})
+redisClient.on('error', (err) => console.error('Redis Client Error', err));
 
-redisClient.connect().catch(console.error);
+(async () => {
+  await redisClient.connect();
+  // Start your Express server here
+})().catch(console.error);
 
 // Session setup
 app.use(session({
