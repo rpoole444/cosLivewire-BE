@@ -39,7 +39,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
 
 const redisClient = createClient({
-  url: process.env.REDISCLOUD_URL,
+  url: process.env.REDIS_URL,
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
