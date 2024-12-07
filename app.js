@@ -1,19 +1,20 @@
 require('dotenv').config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
 });
-
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
+const redis = require('redis');
+const RedisStore = require('connect-redis')(session)
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
 const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
-app.set('trust proxy', 1); // Trust first proxy
+app.set('trust proxy', 1);
 
 const allowedOrigins = [
   'http://localhost:3000', // Local development
@@ -31,26 +32,35 @@ app.use(cors({
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
 
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379',
+  legacyMode: true,
+});
+
+redisClient.on('error', (err) => {
+  console.error('Error connecting to Redis:', err);
+})
+
+redisClient.connect().catch(console.error);
+
 // Session setup
 app.use(session({
+  store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'none',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 1000 * 60 * 60 * 24, //1 day
   },
 }));
-
-
 
 // Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 initializePassport(passport, findUserByEmail, findUserById);
-
-// Initialize Passport
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
