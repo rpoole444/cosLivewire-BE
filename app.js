@@ -7,7 +7,7 @@ const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
 const { createClient } = require('redis');
-const { RedisStore } = require('connect-redis');
+const RedisStore = require('connect-redis').default; // Note the `.default` import
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
@@ -39,16 +39,12 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
 
 const redisClient = createClient({
-  url: process.env.REDIS_URL,
-  legacyMode: true,
+  url: process.env.REDISCLOUD_URL,
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
 
-(async () => {
-  await redisClient.connect();
-  // Start your Express server here
-})().catch(console.error);
+redisClient.connect().catch(console.error);
 
 // Session setup
 app.use(session({
