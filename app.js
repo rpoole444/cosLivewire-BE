@@ -18,20 +18,19 @@ app.set('trust proxy', 1);
 
 const allowedOrigins = [
   'http://localhost:3000', // Local development
-  'http://localhost:3001', // Another local development port
   'https://alpine-groove-guide.vercel.app' // Vercel deployment
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (allowedOrigins.includes(origin) || !origin) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH','DELETE'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
