@@ -68,6 +68,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       end_time,
       poster: req.file ? req.file.location : null, // Save the S3 URL if a file is uploaded
     };
+  console.log("File Data POSTER PIC:", req.file);
 
     const event = await createEvent(eventData);
     console.log("Event submitted", event);

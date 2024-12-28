@@ -96,6 +96,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
+console.log("File Data-UPDATEPROFILEPIC : ", req.file);
 
   const userId = req.user.id;
   const { first_name, last_name, email, user_description, top_music_genres } = req.body;
