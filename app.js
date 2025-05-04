@@ -18,7 +18,7 @@ app.set('trust proxy', 1);
 
 const allowedOrigins = [
   'http://localhost:3000', // Local development
-  'https://alpine-groove-guide.vercel.app' // Vercel deployment
+  'https://app.alpinegrooveguide.com'// Vercel deployment
 ];
 
 app.use(cors({
