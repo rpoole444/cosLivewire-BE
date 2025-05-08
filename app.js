@@ -17,7 +17,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 const allowedOrigins = [
-  'http://localhost:3000', // Local development
+  'http://localhost:3001', // Local development
   'https://app.alpinegrooveguide.com'// Vercel deployment
 ];
 
