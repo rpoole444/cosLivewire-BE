@@ -1,6 +1,7 @@
 require('dotenv').config({
-  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development'
 });
+
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
@@ -50,15 +51,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET|| 'keyboard cat',
   resave: false,
   saveUninitialized: false,
-  cookie: {
     cookie: {
       secure: process.env.NODE_ENV === 'production', // ✅ secure: false in dev
       httpOnly: true,
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 1000 * 60 * 60 * 24,
     },
-
-  },
 }));
 
 // Passport middleware
