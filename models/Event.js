@@ -2,11 +2,26 @@
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
+const { v4: uuidv4 } = require('uuid');
+
  // Adjust the path as necessary for your project structure
 
 const createEvent = async (eventData) => {
   return knex('events').insert(eventData).returning('*'); // Assuming PostgreSQL for returning inserted row
 };
+
+const createRecurringEvents = async (baseEventData, recurrenceDates) => {
+  const recurring_group_id = uuidv4();
+
+  const eventsToInsert = recurrenceDates.map((recurrenceDate) => ({
+    ...baseEventData,
+    date: recurrenceDate,
+    recurring_group_id,
+  }));
+
+  return knex('events').insert(eventsToInsert).returning('*');
+};
+
 
 const getEventsForReview = async () => {
   // 1) Perform a left join on "users" to include user fields
@@ -72,9 +87,10 @@ const deleteEvent = async (eventId) => {
 module.exports = {
   updateEvent,
   createEvent,
+  createRecurringEvents,
   getEventsForReview,
   updateEventStatus,
   getAllEvents,
   findEventById,
-  deleteEvent
+  deleteEvent,
 }
