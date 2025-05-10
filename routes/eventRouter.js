@@ -4,6 +4,7 @@ const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
+const { v4: uuidv4 } = require('uuid');
 
 // Configure AWS SDK v3
 const s3 = new S3Client({
@@ -48,16 +49,23 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       venue_name,
       website,
       start_time,
-      end_time
+      end_time,
+      recurrenceDates // This should be passed from the frontend as a JSON array
     } = req.body;
 
-    const eventData = {
+    const recurring_group_id = recurrenceDates ? uuidv4() : null;
+
+    const datesArray = recurrenceDates
+      ? JSON.parse(recurrenceDates)
+      : [date];
+
+    const eventsToInsert = datesArray.map((recurrenceDate) => ({
       user_id,
       title,
       description,
       location,
       address,
-      date,
+      date: recurrenceDate,
       genre,
       ticket_price,
       age_restriction,
@@ -66,20 +74,20 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website,
       start_time,
       end_time,
-      poster: req.file ? req.file.location : null, // Save the S3 URL if a file is uploaded
-    };
-  console.log("File Data POSTER PIC:", req.file);
+      recurring_group_id,
+      poster: req.file ? req.file.location : null,
+    }));
 
-    const event = await createEvent(eventData);
-    console.log("Event submitted", event);
-    res.status(201).json({ event: event[0], message: 'Event submitted successfully.' });
+    const insertedEvents = await knex('events').insert(eventsToInsert).returning('*');
+    console.log("Inserted recurring events:", insertedEvents);
+
+    res.status(201).json({ events: insertedEvents, message: 'Events submitted successfully.' });
   } catch (error) {
-    console.error(error);
-    console.error('Error submitting event:', error);
-
+    console.error('Error submitting recurring event(s):', error);
     res.status(500).json({ message: 'Internal server error.' });
   }
 });
+
 
 // Fetch events pending review
 eventRouter.get('/review', async (req, res) => {
