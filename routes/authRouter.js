@@ -94,41 +94,53 @@ authRouter.post('/register', async (req, res, next) => {
 
 // Update user profile route
 authRouter.put('/update-profile', upload.single('profile_picture'), async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
-console.log("File Data-UPDATEPROFILEPIC : ", req.file);
-
-  const userId = req.user.id;
-  const { first_name, last_name, email, user_description, top_music_genres } = req.body;
-  const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : req.user.profile_picture;
-
   try {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: 'Not authenticated' });
+    }
+
+    console.log("File Data-UPDATEPROFILEPIC : ", req.file);
+    console.log("Body Data: ", req.body);
+    console.log("User from session: ", req.user);
+
+    const userId = req.user.id;
+    const { first_name, last_name, email, user_description, top_music_genres } = req.body;
+
+    const profilePictureUrl = req.file
+      ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`
+      : req.user.profile_picture;
+
     const genres = Array.isArray(top_music_genres)
       ? top_music_genres.slice(0, 3)
       : typeof top_music_genres === 'string'
-      ? JSON.parse(top_music_genres).slice(0, 3)
-      : [];
+        ? JSON.parse(top_music_genres).slice(0, 3)
+        : [];
 
     if (req.file && req.user.profile_picture) {
       const oldKey = req.user.profile_picture.split('/').pop();
       await deleteProfilePicture(oldKey);
     }
 
-    const updatedUser = await updateUser(userId, {
-      first_name,
-      last_name,
-      email,
-      user_description,
-      top_music_genres: JSON.stringify(genres), // Save as JSON string
-    }, profilePictureUrl);
+    const updatedUser = await updateUser(
+      userId,
+      {
+        first_name,
+        last_name,
+        email,
+        user_description,
+        top_music_genres: JSON.stringify(genres),
+      },
+      profilePictureUrl
+    );
 
-    res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
+    return res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
+
   } catch (error) {
-    console.error('Error updating profile:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('🔴 Error in update-profile:', error); // Make sure you see this in the logs
+    return res.status(500).json({ message: error.message || 'Internal server error' });
   }
 });
+
 
 authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req, res) => {
   if (!req.isAuthenticated()) {
