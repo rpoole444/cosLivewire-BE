@@ -50,7 +50,6 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       address,
       date,
       genre,
-      ticket_price,
       age_restriction,
       website_link,
       venue_name,
@@ -61,7 +60,12 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     } = req.body;
 
     const posterUrl = req.file ? req.file.location : null;
-
+let { ticket_price } = req.body;
+if (typeof ticket_price === 'string') {
+  ticket_price = ticket_price.replace(/[^\d.]/g, '');
+  ticket_price = parseFloat(ticket_price);
+}
+if (isNaN(ticket_price)) ticket_price = null;
     const baseEventData = {
       user_id,
       title,
