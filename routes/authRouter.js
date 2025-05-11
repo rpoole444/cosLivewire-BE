@@ -100,7 +100,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
 console.log("File Data-UPDATEPROFILEPIC : ", req.file);
 
   const userId = req.user.id;
-  const { first_name, last_name, email, user_description, top_music_genres } = req.body;
+  const { first_name, last_name, email, user_description, top_music_genres, display_name } = req.body;
   const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : req.user.profile_picture;
 
   try {
@@ -118,6 +118,7 @@ console.log("File Data-UPDATEPROFILEPIC : ", req.file);
     const updatedUser = await updateUser(userId, {
       first_name,
       last_name,
+      display_name,
       email,
       user_description,
       top_music_genres: JSON.stringify(genres), // Save as JSON string
