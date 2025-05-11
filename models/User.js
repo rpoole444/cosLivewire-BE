@@ -15,6 +15,7 @@ const s3 = new S3Client({
 const createUser = async ({
   firstName,
   lastName,
+  displayName,
   email,
   password,
   userDescription = '',
@@ -26,6 +27,7 @@ const createUser = async ({
   const [newUser] = await knex('users').insert({
     first_name: firstName,
     last_name: lastName,
+    display_name: displayName,
     email,
     password: hashedPassword,
     user_description: userDescription,

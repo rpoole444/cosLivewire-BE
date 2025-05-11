@@ -45,7 +45,7 @@ const validatePassword = (password) => {
 // User registration
 authRouter.post('/register', async (req, res, next) => {
   try {
-    const { first_name, last_name, email, password, user_description, top_music_genres } = req.body;
+    const { first_name, last_name, display_name, email, password, user_description, top_music_genres } = req.body;
 
     if (!first_name || !last_name || !email || !password) {
       return res.status(400).json({ error: 'Please provide an email and password' });
@@ -71,6 +71,7 @@ authRouter.post('/register', async (req, res, next) => {
     const newUser = await createUser({
       firstName: first_name,
       lastName: last_name,
+      displayName: display_name,
       email: normalizedEmail,
       password,
       userDescription: user_description,
