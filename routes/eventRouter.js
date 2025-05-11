@@ -140,7 +140,41 @@ eventRouter.put('/:eventId', async (req, res) => {
 
   try {
     const { eventId } = req.params;
-    const updatedEvent = await updateEvent(eventId, req.body);
+
+    // ✅ SANITIZE req.body
+    const {
+      title,
+      description,
+      location,
+      date,
+      start_time,
+      end_time,
+      genre,
+      ticket_price,
+      age_restriction,
+      website_link,
+      venue_name,
+      website,
+      address,
+    } = req.body;
+
+    const sanitizedPayload = {
+      title,
+      description,
+      location,
+      date,
+      start_time,
+      end_time,
+      genre,
+      ticket_price: ticket_price === '' ? null : parseFloat(ticket_price),
+      age_restriction,
+      website_link,
+      venue_name,
+      website,
+      address,
+    };
+
+    const updatedEvent = await updateEvent(eventId, sanitizedPayload);
 
     if (updatedEvent.length === 0) {
       return res.status(404).json({ message: 'Event not found' });
@@ -148,10 +182,11 @@ eventRouter.put('/:eventId', async (req, res) => {
 
     res.json({ event: updatedEvent[0], message: 'Event updated successfully.' });
   } catch (error) {
-    console.error(error);
+    console.error('Update error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 /**
  * Get single event by ID
