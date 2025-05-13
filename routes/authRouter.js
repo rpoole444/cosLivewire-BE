@@ -42,7 +42,7 @@ const validatePassword = (password) => {
   return passwordRegex.test(password);
 };
 
-authRouter.delete('/user/:id', async (req, res) => {
+authRouter.delete('/users/:id', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {
     return res.status(403).json({ message: 'Not authorized' });
   }
@@ -75,8 +75,6 @@ authRouter.post('/register', async (req, res, next) => {
     error: 'Password must be at least 8 characters and include a mix of uppercase letters, lowercase letters, numbers, and a symbol.' 
   });
 }
-
-
     const normalizedEmail = email.toLowerCase();
     const existingUser = await findUserByEmail(normalizedEmail);
 
