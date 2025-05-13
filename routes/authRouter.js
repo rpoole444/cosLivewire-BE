@@ -42,7 +42,7 @@ const validatePassword = (password) => {
   return passwordRegex.test(password);
 };
 
-authRouter.delete('/deleteUser/:id', async (req, res) => {
+authRouter.delete('/user/:id', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {
     return res.status(403).json({ message: 'Not authorized' });
   }
