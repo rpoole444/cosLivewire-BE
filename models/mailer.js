@@ -74,7 +74,6 @@ exports.sendEventReceiptEmail = async (event, userEmail) => {
         <h2>Your event is in review!</h2>
         <p>Title: <strong>${event.title}</strong></p>
         <p>Date:  ${event.date}</p>
-        <p>You can preview it here: <a href="${process.env.FRONTEND_URL}/events/${event.id}">event link</a></p>
         <p>${editProtocol}</p>
         <p>We'll notify you once it's approved.</p>
         <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
@@ -97,7 +96,7 @@ exports.sendEventApprovedEmail = async (event, userEmail) => {
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
         <h2>🎉 Congrats! Your event is published.</h2>
-        <p>View it here: <a href="${process.env.FRONTEND_URL}/events/${event.id}">event link</a></p>
+        <p>View it here: <a href="${process.env.CORS_ORIGIN}/events/${event.id}">event link</a></p>
         <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
       </div>
     `,
