@@ -4,7 +4,7 @@ const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
-const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../mailer/mailer");
+const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mailer");
 const { findUserById } = require("../models/User");   // add this line
 
 
