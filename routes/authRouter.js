@@ -38,9 +38,10 @@ function ensureAuthenticated(req, res, next) {
 }
 // Validate password function
 const validatePassword = (password) => {
-  const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+  const passwordRegex = /^.{8,}$/; // At least 8 characters
   return passwordRegex.test(password);
 };
+
 
 // User registration
 authRouter.post('/register', async (req, res, next) => {
@@ -52,8 +53,11 @@ authRouter.post('/register', async (req, res, next) => {
     }
 
     if (!validatePassword(password)) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters long and include a mix of uppercase letters, lowercase letters, numbers, and special characters.' });
-    }
+  return res.status(400).json({ 
+    error: 'Password must be at least 8 characters and include a mix of uppercase letters, lowercase letters, numbers, and a symbol.' 
+  });
+}
+
 
     const normalizedEmail = email.toLowerCase();
     const existingUser = await findUserByEmail(normalizedEmail);
