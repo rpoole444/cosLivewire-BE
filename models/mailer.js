@@ -1,69 +1,109 @@
-const nodemailer = require('nodemailer');
+// mailer.js   (or mailer/index.js)
+const nodemailer = require("nodemailer");
+const path = require("path");
+const fs   = require("fs");
 
-// Set up nodemailer with your SMTP details
-let transporter = nodemailer.createTransport({
-  service: 'gmail', // For Gmail, you can use other services or SMTP
+// ---------- transporter ----------
+const transporter = nodemailer.createTransport({
+  service: "gmail",
   auth: {
-    user: process.env.EMAIL_USERNAME, // Your email
-    pass: process.env.EMAIL_PASSWORD, // Your email password
-  },
+    user: process.env.EMAIL_USERNAME,
+    pass: process.env.EMAIL_PASSWORD
+  }
 });
 
-const sendPasswordResetEmail = async (email, resetToken) => {
-const resetPasswordUrl = `http://localhost:3001/reset-password/${resetToken}`;
-const logoUrl = 'http://localhost:3000/alpine_groove_guide_icon.png';
+// ---------- helper: inline image ----------
+const inlineImage = (filePath, cid) => ({
+  filename: path.basename(filePath),
+  path: filePath,            // absolute or relative to this file
+  cid                         // <img src="cid:cid">
+});
 
-  let mailOptions = {
+// logo lives in /public — adjust as needed
+const LOGO_PATH = path.join(__dirname, "..", "public", "alpine_groove_guide_icon.png");
+
+// ---------- 1.  password‑reset ----------
+exports.sendPasswordResetEmail = async (email, resetToken) => {
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+  await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
-    to: email,
-    subject: 'Password Reset Link',
+    to:   email,
+    subject: "Password Reset Link",
     html: `
-      <div style="font-family: Arial, sans-serif; text-align: center;">
-        <img src="${logoUrl}" alt="Your Logo" style="width: 100px; height: auto;"/>
+      <div style="font-family:Arial,sans-serif;text-align:center">
+        <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
         <h2>Password Reset Request</h2>
-        <p>We received a request to reset your password. Please click on the following link to reset your password:</p>
-        <p><a href="${resetPasswordUrl}">Reset Password</a></p>
-        <p>If you did not request a password reset, please ignore this email.</p>
-        <p>Best Regards,<br/>The Team</p>
+        <p>Click to reset your password:</p>
+        <p><a href="${resetUrl}">${resetUrl}</a></p>
+        <p>If you didn't request this, ignore the e‑mail.</p>
       </div>
     `,
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (e) {
-    console.error("Error Sending Email:", e);
-    throw e;
-  }
+    attachments: [inlineImage(LOGO_PATH, "logo")]
+  });
 };
 
-const sendRegistrationEmail = async (email, firstName, lastName) => {
-  const logoUrl = 'http://localhost:3000/alpine_groove_guide_icon.png'; // Update with your actual server URL
-
-  let mailOptions = {
+// ---------- 2.  registration ----------
+exports.sendRegistrationEmail = async (email, first, last) => {
+  await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
-    to: email,
-    subject: 'Registration Confirmation',
+    to:   email,
+    subject: "Welcome to Alpine Groove Guide!",
     html: `
-      <div style="font-family: Arial, sans-serif; text-align: center;">
-        <img src="${logoUrl}" alt="Your Logo" style="width: 100px; height: auto;"/>
-        <h2>Welcome to Our Service, ${firstName} ${lastName}!</h2>
-        <p>Thank you for registering. We are excited to have you on board.</p>
-        <p>Enjoy exploring our platform and connecting with others. Let's Share Your Events!</p>
-        <p>Best Regards,<br/>The Alpine Groove Guide Team</p>
+      <div style="font-family:Arial,sans-serif;text-align:center">
+        <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
+        <h2>Welcome, ${first} ${last}!</h2>
+        <p>Thanks for registering—time to share some gigs.</p>
       </div>
     `,
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (e) {
-    console.error("Error Sending Email:", e);
-    throw e;
-  }
+    attachments: [inlineImage(LOGO_PATH, "logo")]
+  });
 };
 
-module.exports = {
-  sendPasswordResetEmail,
-  sendRegistrationEmail
+// ---------- 3.  event‑submission receipt ----------
+exports.sendEventReceiptEmail = async (event, userEmail) => {
+  const editProtocol = "Email Reid (reid@alpinegroove.com) with corrections.";
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to:   userEmail,
+    subject: `We received “${event.title}” 🎶`,
+    html: `
+      <div style="font-family:Arial,sans-serif;text-align:center">
+        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
+        <h2>Your event is in review!</h2>
+        <p>Title: <strong>${event.title}</strong></p>
+        <p>Date:  ${event.date}</p>
+        <p>You can preview it here: <a href="${process.env.FRONTEND_URL}/events/${event.id}">event link</a></p>
+        <p>${editProtocol}</p>
+        <p>We'll notify you once it's approved.</p>
+        <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
+      </div>
+    `,
+    attachments: [
+      inlineImage(LOGO_PATH, "logo"),
+      ...(event.image_url ? [inlineImage(event.image_url, "poster")] : [])
+    ]
+  });
+};
+
+// ---------- 4.  event approved ----------
+exports.sendEventApprovedEmail = async (event, userEmail) => {
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to:   userEmail,
+    subject: `Your event “${event.title}” is live!`,
+    html: `
+      <div style="font-family:Arial,sans-serif;text-align:center">
+        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
+        <h2>🎉 Congrats! Your event is published.</h2>
+        <p>View it here: <a href="${process.env.FRONTEND_URL}/events/${event.id}">event link</a></p>
+        <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
+      </div>
+    `,
+    attachments: [
+      inlineImage(LOGO_PATH, "logo"),
+      ...(event.image_url ? [inlineImage(event.image_url, "poster")] : [])
+    ]
+  });
 };

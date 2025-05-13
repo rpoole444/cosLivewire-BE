@@ -4,6 +4,9 @@ const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
+const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../mailer/mailer");
+const { findUserById } = require("../models/User");   // add this line
+
 
 const {
   deleteEvent,
@@ -59,13 +62,16 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       recurrenceDates,
     } = req.body;
 
+    // poster URL (or null)
     const posterUrl = req.file ? req.file.location : null;
-let { ticket_price } = req.body;
-if (typeof ticket_price === 'string') {
-  ticket_price = ticket_price.replace(/[^\d.]/g, '');
-  ticket_price = parseFloat(ticket_price);
-}
-if (isNaN(ticket_price)) ticket_price = null;
+
+    // 💵 normalise ticket price
+    let { ticket_price } = req.body;
+    if (typeof ticket_price === 'string') {
+      ticket_price = parseFloat(ticket_price.replace(/[^\d.]/g, ''));
+    }
+    if (isNaN(ticket_price)) ticket_price = null;
+
     const baseEventData = {
       user_id,
       title,
@@ -83,13 +89,22 @@ if (isNaN(ticket_price)) ticket_price = null;
       poster: posterUrl,
     };
 
+    // ---------- insert ----------
     let insertedEvents;
-
     if (recurrenceDates) {
-      const parsedDates = JSON.parse(recurrenceDates);
-      insertedEvents = await createRecurringEvents(baseEventData, parsedDates);
+      const parsed = JSON.parse(recurrenceDates);
+      insertedEvents = await createRecurringEvents(baseEventData, parsed);
     } else {
       insertedEvents = await createEvent({ ...baseEventData, date });
+    }
+
+    // ---------- e‑mail receipt ----------
+    try {
+      const firstEvent  = Array.isArray(insertedEvents) ? insertedEvents[0] : insertedEvents;
+      await sendEventReceiptEmail(firstEvent, req.user.email);
+    } catch (mailErr) {
+      console.error('Receipt e‑mail failed:', mailErr);
+      // do NOT return 500 – the event is saved; just log
     }
 
     res.status(201).json({
@@ -101,6 +116,7 @@ if (isNaN(ticket_price)) ticket_price = null;
     res.status(500).json({ message: 'Internal server error.' });
   }
 });
+
 
 /**
  * Fetch events pending review
@@ -120,15 +136,32 @@ eventRouter.get('/review', async (req, res) => {
  */
 eventRouter.put('/review/:eventId', async (req, res) => {
   try {
-    const { eventId } = req.params;
+    const { eventId }  = req.params;
     const { isApproved } = req.body;
-    const updatedEvent = await updateEventStatus(eventId, isApproved);
-    res.json({ event: updatedEvent[0], message: 'Event status updated successfully.' });
+
+    const updatedEventArr = await updateEventStatus(eventId, isApproved);
+    const updatedEvent    = updatedEventArr[0];
+
+    // ---------- e‑mail only when approved ----------
+    if (isApproved) {
+      try {
+        const owner = await findUserById(updatedEvent.user_id);
+        if (owner?.email) {
+          await sendEventApprovedEmail(updatedEvent, owner.email);
+        }
+      } catch (mailErr) {
+        console.error('Approval e‑mail failed:', mailErr);
+        // keep going – approval itself succeeded
+      }
+    }
+
+    res.json({ event: updatedEvent, message: 'Event status updated successfully.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error.' });
   }
 });
+
 
 /**
  * Edit/update event data
