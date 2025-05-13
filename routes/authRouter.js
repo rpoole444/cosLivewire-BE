@@ -227,6 +227,7 @@ authRouter.post('/login', (req, res, next) => {
             is_logged_in: user.is_logged_in, 
             is_admin: user.is_admin,
             top_music_genres: user.top_music_genres,
+            displayName: user.display_name,
             user_description: user.user_description,
           }
         });
