@@ -42,6 +42,24 @@ const validatePassword = (password) => {
   return passwordRegex.test(password);
 };
 
+authRouter.delete('/deleteUser/:id', async (req, res) => {
+  if (!req.isAuthenticated() || !req.user.is_admin) {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  const { id } = req.params;
+
+  try {
+    const deletedUser = await deleteUser(Number(id));
+    if (!deletedUser) {
+      return res.status(404).json({ message: 'User not found or already deleted' });
+    }
+    res.json({ message: 'User deleted successfully', user: deletedUser });
+  } catch (error) {
+    console.error("Failed to delete user:", error);
+    res.status(500).json({ message: 'Server error deleting user' });
+  }
+});
 
 // User registration
 authRouter.post('/register', async (req, res, next) => {

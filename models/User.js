@@ -54,6 +54,20 @@ const updateUser = async (id, userData, profilePictureUrl) => {
   return updatedUser;
 };
 
+const deleteUser = async (userId) => {
+  try {
+    const [user] = await knex('users')
+      .where({ id: userId })
+      .del()
+      .returning('*'); // Optional: only if you want to confirm the deleted user
+    return user;
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    throw new Error("Could not delete user");
+  }
+};
+
+
 const updateUserProfilePicture = async (id, profilePictureUrl) => {
   const [updatedUser] = await knex('users')
     .where({ id })
@@ -162,4 +176,5 @@ module.exports = {
   updateUserProfilePicture,
   deleteProfilePicture,
   getProfilePictureUrl,
+  deleteUser
 }
