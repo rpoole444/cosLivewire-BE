@@ -7,7 +7,7 @@ const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
-const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus } = require('../models/User');
+const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser } = require('../models/User');
 
 const authRouter = express.Router();
 
