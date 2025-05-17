@@ -6,6 +6,7 @@ const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
 const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mailer");
 const { findUserById } = require("../models/User");   // add this line
+const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 
 const {
@@ -162,19 +163,46 @@ eventRouter.put('/review/:eventId', async (req, res) => {
   }
 });
 
-
 /**
  * Edit/update event data
  */
-eventRouter.put('/:eventId', async (req, res) => {
+eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
   if (!req.isAuthenticated?.()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
   try {
     const { eventId } = req.params;
+    const event = await findEventById(eventId);
+    if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // ✅ SANITIZE req.body
+    // 🔐 Auth check
+    if (event.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ message: 'Not authorized to edit this event' });
+    }
+
+    let poster_url = event.poster_url;
+
+    // ✅ Delete old poster if a new one is uploaded
+    if (req.file) {
+      // Parse old poster key from S3 URL
+      if (poster_url) {
+        const oldKey = poster_url.split('/').pop(); // Get filename from URL
+        try {
+          await s3.send(new DeleteObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME,
+            Key: oldKey,
+          }));
+          console.log(`Deleted old poster from S3: ${oldKey}`);
+        } catch (err) {
+          console.error('Failed to delete old poster from S3:', err);
+        }
+      }
+
+      // Set new poster URL
+      poster_url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`;
+    }
+
     const {
       title,
       description,
@@ -199,27 +227,24 @@ eventRouter.put('/:eventId', async (req, res) => {
       start_time,
       end_time,
       genre,
-      ticket_price: ticket_price === '' ? null : parseFloat(ticket_price),
+      ticket_price: ticket_price === '' ? null : ticket_price,
       age_restriction,
       website_link,
       venue_name,
       website,
       address,
+      poster_url,
     };
 
     const updatedEvent = await updateEvent(eventId, sanitizedPayload);
 
-    if (updatedEvent.length === 0) {
-      return res.status(404).json({ message: 'Event not found' });
-    }
-
     res.json({ event: updatedEvent[0], message: 'Event updated successfully.' });
+
   } catch (error) {
-    console.error('Update error:', error);
+    console.error('Error updating event:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-
 
 /**
  * Get single event by ID
