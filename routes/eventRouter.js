@@ -181,13 +181,13 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to edit this event' });
     }
 
-    let poster_url = event.poster_url;
+    let poster = event.poster;
 
     // ✅ Delete old poster if a new one is uploaded
     if (req.file) {
       // Parse old poster key from S3 URL
-      if (poster_url) {
-        const oldKey = poster_url.split('/').pop(); // Get filename from URL
+      if (poster) {
+        const oldKey = poster.split('/').pop(); // Get filename from URL
         try {
           await s3.send(new DeleteObjectCommand({
             Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -200,7 +200,7 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       }
 
       // Set new poster URL
-      poster_url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`;
+      poster = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`;
     }
 
     const {
@@ -233,7 +233,7 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       venue_name,
       website,
       address,
-      poster_url,
+      poster,
     };
 
     const updatedEvent = await updateEvent(eventId, sanitizedPayload);

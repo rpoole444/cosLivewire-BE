@@ -74,9 +74,31 @@ const updateEvent = async(eventId, eventData) => {
     .returning('*');
 }
 
-const findEventById = (eventId) => {
-  return knex('events').where({ id: eventId }).first();
-}
+const findEventById = async (eventId) => {
+  const event = await knex('events')
+    .leftJoin('users', 'events.user_id', 'users.id')
+    .select(
+      'events.*',
+      'users.first_name as user_first_name',
+      'users.last_name as user_last_name',
+      'users.email as user_email'
+    )
+    .where('events.id', eventId)
+    .first();
+
+  if (!event) return null;
+
+  // Nest user data
+  return {
+    ...event,
+    user: {
+      first_name: event.user_first_name,
+      last_name: event.user_last_name,
+      email: event.user_email,
+    },
+  };
+};
+
 
 const deleteEvent = async (eventId) => {
   return knex('events')
