@@ -64,7 +64,7 @@ authRouter.delete('/users/:id', async (req, res) => {
 // User registration
 authRouter.post('/register', async (req, res, next) => {
   try {
-    const { first_name, last_name, display_name, email, password, user_description, top_music_genres } = req.body;
+    const { first_name, last_name, displayName, email, password, user_description, top_music_genres } = req.body;
 
     if (!first_name || !last_name || !email || !password) {
       return res.status(400).json({ error: 'Please provide an email and password' });
@@ -91,7 +91,7 @@ authRouter.post('/register', async (req, res, next) => {
     const newUser = await createUser({
       firstName: first_name,
       lastName: last_name,
-      displayName: display_name,
+      displayName,
       email: normalizedEmail,
       password,
       userDescription: user_description,
@@ -120,7 +120,7 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
 console.log("File Data-UPDATEPROFILEPIC : ", req.file);
 
   const userId = req.user.id;
-  const { first_name, last_name, email, user_description, top_music_genres, display_name } = req.body;
+  const { first_name, last_name, email, user_description, top_music_genres, displayName } = req.body;
   const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : req.user.profile_picture;
 
   try {
@@ -138,7 +138,7 @@ console.log("File Data-UPDATEPROFILEPIC : ", req.file);
     const updatedUser = await updateUser(userId, {
       first_name,
       last_name,
-      display_name,
+      displayName,
       email,
       user_description,
       top_music_genres: JSON.stringify(genres), // Save as JSON string
