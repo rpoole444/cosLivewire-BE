@@ -87,5 +87,58 @@ artistRouter.get('/user/:id', async (req, res) => {
   }
 });
 
+// PUT /api/artists/:slug — update artist profile
+artistRouter.put('/:slug', upload.single('profile_image'), async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { slug } = req.params;
+  const {
+    display_name,
+    bio,
+    contact_email,
+    genres: rawGenres,
+  } = req.body;
+
+  try {
+    const artist = await Artist.findBySlug(slug);
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    if (artist.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ message: 'Forbidden: You do not own this profile' });
+    }
+
+    // handle profile image
+    let profile_image = artist.profile_image;
+    if (req.file) {
+      if (profile_image) {
+        const oldKey = profile_image.split('/').pop();
+        try {
+          await s3.send(new DeleteObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME,
+            Key: `artists/${oldKey}`,
+          }));
+        } catch (err) {
+          console.warn('Failed to delete old profile image from S3:', err);
+        }
+      }
+      profile_image = req.file.location;
+    }
+
+    const genres = Array.isArray(rawGenres) ? rawGenres : JSON.parse(rawGenres);
+
+    const updatedArtist = await Artist.update(slug, {
+      display_name,
+      bio,
+      contact_email,
+      profile_image,
+      genres,
+    });
+
+    res.json(updatedArtist);
+  } catch (err) {
+    console.error('Error updating artist:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 module.exports = artistRouter;
