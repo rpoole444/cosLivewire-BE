@@ -8,16 +8,21 @@ const Artist = {
   },
 
   findBySlugWithEvents: async (slug) => {
-    const artist = await knex('artists').where({ slug }).first();
+    const artist = await knex('artists')
+      .select('*') // 👈 ensures user_id is included
+      .where({ slug })
+      .first();
+  
     if (!artist) return null;
-
+  
     const events = await knex('events')
       .where({ user_id: artist.user_id })
       .andWhere('date', '>=', new Date())
       .orderBy('date');
-
+  
     return { ...artist, events };
   },
+  
   findByUserId: async (user_id) => {
     return knex('artists').where({ user_id }).first();
   },
