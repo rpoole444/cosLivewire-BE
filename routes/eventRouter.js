@@ -273,6 +273,18 @@ eventRouter.get('/', async (req, res) => {
   }
 });
 
+eventRouter.get('/slug/:slug', async (req, res) => {
+  try {
+    const event = await knex('events').where({ slug: req.params.slug }).first();
+    if (!event) return res.status(404).json({ message: 'Event not found' });
+    res.json(event);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 /**
  * Delete event
  */
