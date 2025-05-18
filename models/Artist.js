@@ -18,7 +18,9 @@ const Artist = {
 
     return { ...artist, events };
   },
-
+  findByUserId: async (user_id) => {
+    return db('artists').where({ user_id }).first();
+  },
   create: async (artistData) => {
     const [newArtist] = await knex('artists')
       .insert(artistData)
