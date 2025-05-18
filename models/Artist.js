@@ -26,6 +26,13 @@ const Artist = {
       .insert(artistData)
       .returning('*');
     return newArtist;
+  },
+  update: async (slug, updates) => {
+    const [updated] = await knex('artists')
+      .where({ slug })
+      .update(updates)
+      .returning('*');
+    return updated;
   }
 };
 
