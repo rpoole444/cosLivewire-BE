@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mailer");
 const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
-
+const slugify = require("../")
 
 const {
   deleteEvent,
@@ -18,6 +18,7 @@ const {
   getEventsForReview,
   updateEventStatus,
   updateEvent,
+  findBySlug
 } = require('../models/Event');
 
 // AWS S3 setup
@@ -72,6 +73,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       ticket_price = parseFloat(ticket_price.replace(/[^\d.]/g, ''));
     }
     if (isNaN(ticket_price)) ticket_price = null;
+    const slug = `${slugify(title)}-${Date.now().toString(36)}`;
 
     const baseEventData = {
       user_id,
@@ -87,6 +89,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website,
       start_time,
       end_time,
+      slug,
       poster: posterUrl,
     };
 
@@ -276,7 +279,7 @@ eventRouter.get('/', async (req, res) => {
 eventRouter.get('/slug/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
-    const event = await Event.findBySlug(slug); // You'll need this model method
+    const event = await findBySlug(slug);
     if (!event) return res.status(404).json({ message: 'Event not found' });
     res.json(event);
   } catch (err) {
