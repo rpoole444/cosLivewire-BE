@@ -11,6 +11,8 @@ const { RedisStore } = require('connect-redis');
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
+const artistRouter = require('./routes/artistRouter');
+
 const { findUserByEmail, findUserById } = require('./models/User');
 
 const app = express();
@@ -69,6 +71,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Use routers
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/artists', artistRouter);
 
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
