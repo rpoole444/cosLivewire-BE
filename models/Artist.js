@@ -1,18 +1,17 @@
-const db = require('../db/knex');
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('knex')(config)
 
 const Artist = {
   findBySlug: async (slug) => {
-    return db('artists').where({ slug }).first();
+    return knex('artists').where({ slug }).first();
   },
 
   findBySlugWithEvents: async (slug) => {
-    const artist = await db('artists').where({ slug }).first();
+    const artist = await knex('artists').where({ slug }).first();
     if (!artist) return null;
 
-    const events = await db('events')
+    const events = await knex('events')
       .where({ user_id: artist.user_id })
       .andWhere('date', '>=', new Date())
       .orderBy('date');
@@ -21,7 +20,7 @@ const Artist = {
   },
 
   create: async (artistData) => {
-    const [newArtist] = await db('artists')
+    const [newArtist] = await knex('artists')
       .insert(artistData)
       .returning('*');
     return newArtist;
