@@ -98,6 +98,9 @@ const findEventById = async (eventId) => {
     },
   };
 };
+const findBySlug = async (slug) => {
+  return knex('events').where({ slug }).first();
+}
 
 
 const deleteEvent = async (eventId) => {
@@ -115,4 +118,5 @@ module.exports = {
   getAllEvents,
   findEventById,
   deleteEvent,
+  findBySlug
 }
