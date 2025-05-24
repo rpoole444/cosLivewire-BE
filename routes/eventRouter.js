@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mailer");
 const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const slugify = require("../")
+const slugify = require("../utils/slugify")
 
 const {
   deleteEvent,
