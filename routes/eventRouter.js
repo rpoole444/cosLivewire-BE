@@ -8,6 +8,7 @@ const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mai
 const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const slugify = require("../utils/slugify")
+const generateUniqueSlug = require('../utils/generateUniqueSlug');
 
 const {
   deleteEvent,
@@ -73,7 +74,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       ticket_price = parseFloat(ticket_price.replace(/[^\d.]/g, ''));
     }
     if (isNaN(ticket_price)) ticket_price = null;
-    const slug = `${slugify(title)}-${Date.now().toString(36)}`;
+    const slug =  await generateUniqueSlug(title);
 
     const baseEventData = {
       user_id,
