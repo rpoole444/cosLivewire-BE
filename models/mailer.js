@@ -81,7 +81,7 @@ exports.sendEventReceiptEmail = async (event, userEmail) => {
     `,
     attachments: [
       inlineImage(LOGO_PATH, "logo"),
-      ...(event.image_url ? [inlineImage(event.image_url, "poster")] : [])
+      ...(event.poster ? [inlineImage(event.poster, "poster")] : [])
     ]
   });
 };
