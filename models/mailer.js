@@ -96,7 +96,7 @@ exports.sendEventApprovedEmail = async (event, userEmail) => {
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
         <h2>🎉 Congrats! Your event is published.</h2>
-        <p>View it here: <a href="${process.env.CORS_ORIGIN}/events/${event.slug}">event link</a></p>
+        <p>View it here: <a href="${process.env.CORS_ORIGIN}/eventRouter/${event.slug}">event link</a></p>
         <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
       </div>
     `,
