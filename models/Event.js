@@ -99,8 +99,11 @@ const findEventById = async (eventId) => {
   };
 };
 const findBySlug = async (slug) => {
-  return knex('events').where({ slug }).first();
+  return knex('events')
+    .where({ slug, is_approved: true }) 
+    .first();
 }
+
 
 
 const deleteEvent = async (eventId) => {
