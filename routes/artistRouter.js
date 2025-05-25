@@ -21,6 +21,17 @@ const upload = multer({
   }),
 });
 
+// GET all public artist profiles
+artistRouter.get('/public-list', async (req, res) => {
+  try {
+    const artists = await Artist.findAllPublic();
+    res.json(artists);
+  } catch (err) {
+    console.error('Error fetching public artist list:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {
   try {

@@ -6,7 +6,11 @@ const Artist = {
   findBySlug: async (slug) => {
     return knex('artists').where({ slug }).first();
   },
-
+  findAllPublic: async () => {
+    return await knex('artists')
+      .select('display_name', 'slug', 'profile_image', 'genres', 'bio')
+      .orderBy('display_name');
+  },
   findBySlugWithEvents: async (slug) => {
     const artist = await knex('artists')
       .select('*') // 👈 ensures user_id is included
