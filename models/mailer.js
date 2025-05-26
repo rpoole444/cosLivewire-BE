@@ -29,7 +29,7 @@ exports.sendPasswordResetEmail = async (email, resetToken) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   email,
-    subject: "Password Reset Link",
+    subject: "Alpine Groove • Password Reset Link",
     html: `
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
@@ -48,7 +48,7 @@ exports.sendRegistrationEmail = async (email, first, last) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   email,
-    subject: "Welcome to Alpine Groove Guide!",
+    subject: `Welcome to Alpine Groove, ${first}!`,
     html: `
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
@@ -67,7 +67,7 @@ exports.sendEventReceiptEmail = async (event, userEmail) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   userEmail,
-    subject: `We received “${event.title}” 🎶`,
+    subject: `Alpine Groove received “${event.title}” 🎶`,
     html: `
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
@@ -91,7 +91,7 @@ exports.sendEventApprovedEmail = async (event, userEmail) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   userEmail,
-    subject: `Your event “${event.title}” is live!`,
+    subject: `Your event “${event.title}” is live on Alpine Groove 🎉`,
     html: `
       <div style="font-family:Arial,sans-serif;text-align:center">
         <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
