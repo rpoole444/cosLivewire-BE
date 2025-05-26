@@ -45,43 +45,53 @@ artistRouter.get('/:slug', async (req, res) => {
 });
 
 // POST create artist profile
-artistRouter.post('/', upload.single('profile_image'), async (req, res) => {
+artistRouter.post('/', upload.fields([
+  { name: 'profile_image' },
+  { name: 'promo_photo' },
+  { name: 'stage_plot' },
+  { name: 'press_kit' },
+]), async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
 
   const {
-    display_name,
-    bio,
-    contact_email,
-    genres,
-    slug: customSlug
+    display_name, bio, contact_email, genres, slug: customSlug,
+    embed_youtube, embed_soundcloud, embed_bandcamp, website, is_pro
   } = req.body;
 
   const user_id = req.user?.id;
-  if (!user_id || !display_name) return res.status(400).json({ message: 'Missing required fields' });
-
   const slug = customSlug ? customSlug.toLowerCase().replace(/\s+/g, '-') : display_name.toLowerCase().replace(/\s+/g, '-');
 
   try {
     const exists = await Artist.findBySlug(slug);
-    if (exists) return res.status(409).json({ message: 'That slug is already taken' });
+    if (exists) return res.status(409).json({ message: 'Slug is taken' });
 
-    const profileImageUrl = req.file ? req.file.location : null;
+    const files = req.files;
+
     const newArtist = await Artist.create({
       user_id,
       display_name: display_name.trim(),
       bio,
       contact_email,
-      profile_image: profileImageUrl,
       genres: Array.isArray(genres) ? genres : JSON.parse(genres),
       slug,
+      profile_image: files?.profile_image?.[0]?.location || null,
+      promo_photo: files?.promo_photo?.[0]?.location || null,
+      stage_plot: files?.stage_plot?.[0]?.location || null,
+      press_kit: files?.press_kit?.[0]?.location || null,
+      embed_youtube,
+      embed_soundcloud,
+      embed_bandcamp,
+      website,
+      is_pro: is_pro === 'true'
     });
 
     res.status(201).json(newArtist);
   } catch (err) {
-    console.error('Error creating artist:', err);
+    console.error('Create artist error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 artistRouter.get('/user/:id', async (req, res) => {
   const { id } = req.params;
