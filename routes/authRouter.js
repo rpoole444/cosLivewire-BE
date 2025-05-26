@@ -138,7 +138,7 @@ console.log("File Data-UPDATEPROFILEPIC : ", req.file);
     const updatedUser = await updateUser(userId, {
       first_name,
       last_name,
-      displayName,
+      display_name: displayName,
       email,
       user_description,
       top_music_genres: JSON.stringify(genres), // Save as JSON string
