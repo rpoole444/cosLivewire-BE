@@ -109,7 +109,15 @@ artistRouter.get('/user/:id', async (req, res) => {
 });
 
 // PUT /api/artists/:slug — update artist profile
-artistRouter.put('/:slug', upload.single('profile_image'), async (req, res) => {
+artistRouter.put(
+  '/:slug',
+  upload.fields([
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'promo_photo', maxCount: 1 },
+    { name: 'stage_plot', maxCount: 1 },
+    { name: 'press_kit', maxCount: 1 },
+  ]),
+  async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
 
   const { slug } = req.params;
@@ -126,13 +134,28 @@ artistRouter.put('/:slug', upload.single('profile_image'), async (req, res) => {
       display_name: req.body.display_name,
       bio: req.body.bio,
       contact_email: req.body.contact_email,
+      website: req.body.website,
+      is_pro: req.body.is_pro === 'true',
+      embed_youtube: req.body.embed_youtube,
+      embed_soundcloud: req.body.embed_soundcloud,
+      embed_bandcamp: req.body.embed_bandcamp,
       genres: Array.isArray(req.body.genres) ? req.body.genres : JSON.parse(req.body.genres),
     };
-
-    // Optional new profile image
+    
+    // Optional file updates
     if (req.file) {
       updatedFields.profile_image = req.file.location;
     }
+    if (req.files?.promo_photo?.[0]) {
+      updatedFields.promo_photo = req.files.promo_photo[0].location;
+    }
+    if (req.files?.stage_plot?.[0]) {
+      updatedFields.stage_plot = req.files.stage_plot[0].location;
+    }
+    if (req.files?.press_kit?.[0]) {
+      updatedFields.press_kit = req.files.press_kit[0].location;
+    }
+    
 
     const updated = await Artist.update(slug, updatedFields);
     res.json(updated);
