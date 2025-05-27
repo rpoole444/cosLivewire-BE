@@ -24,17 +24,20 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: (origin, callback) => {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl or Postman or same-origin)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`❌ CORS blocked origin: ${origin}`);
+      callback(new Error('CORS policy: Not allowed by Alpine Groove API'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH','DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
