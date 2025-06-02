@@ -82,8 +82,11 @@ artistRouter.post('/', upload.fields([
       embed_soundcloud,
       embed_bandcamp,
       website,
-      is_pro: is_pro === 'true'
+      is_pro: true, // Always start as pro during trial
+      trial_active: true,
+      trial_start_date: new Date()
     });
+    
 
     res.status(201).json(newArtist);
   } catch (err) {
