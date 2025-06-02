@@ -109,9 +109,7 @@ artistRouter.get('/user/:id', async (req, res) => {
 });
 
 // PUT /api/artists/:slug — update artist profile
-artistRouter.put(
-  '/:slug',
-  upload.fields([
+artistRouter.put('/:slug', upload.fields([
     { name: 'profile_image', maxCount: 1 },
     { name: 'promo_photo', maxCount: 1 },
     { name: 'stage_plot', maxCount: 1 },
