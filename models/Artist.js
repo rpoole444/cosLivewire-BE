@@ -24,8 +24,18 @@ const Artist = {
       .andWhere('date', '>=', new Date())
       .orderBy('date');
   
-    return { ...artist, events };
-  },
+      const isTrialExpired = (start) => {
+        const diffInDays = (new Date() - new Date(start)) / (1000 * 60 * 60 * 24);
+        return diffInDays > 30;
+      };
+      
+      
+      return {
+        ...artist,
+        events,
+        trial_expired: isTrialExpired(artist.trial_start_date)
+      };
+    },
   
   findByUserId: async (user_id) => {
     return knex('artists').where({ user_id }).first();
