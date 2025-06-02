@@ -12,6 +12,7 @@ const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
 const artistRouter = require('./routes/artistRouter');
+const stripeRouter = require('./routes/stripe');
 
 const { findUserByEmail, findUserById } = require('./models/User');
 
@@ -75,7 +76,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/artists', artistRouter);
-
+app.use('/api/payments', stripeRouter);
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
 // Error handling middleware should be the last piece of middleware added to the app
