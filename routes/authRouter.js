@@ -179,12 +179,24 @@ authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
 
 // Checks if user is already logged in
 authRouter.get('/session', (req, res) => {
-  if (req.isAuthenticated()) {
-    return res.json({ isLoggedIn: true, user: req.user });
+  if (req.isAuthenticated?.() && req.user) {
+    return res.json({ 
+      isLoggedIn: true, 
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        is_admin: req.user.is_admin,
+        is_pro: req.user.is_pro,
+        displayName: req.user.display_name,
+        top_music_genres: req.user.top_music_genres,
+        user_description: req.user.user_description
+      } 
+    });
   } else {
-    return res.json({ isLoggedIn: false });
+    return res.json({ isLoggedIn: false, user: null });
   }
 });
+
 
 // Login user
 authRouter.post('/login', (req, res, next) => {
@@ -226,6 +238,7 @@ authRouter.post('/login', (req, res, next) => {
             email: user.email, 
             is_logged_in: user.is_logged_in, 
             is_admin: user.is_admin,
+            is_pro: user.is_pro, // ✅ ADD THIS LINE
             top_music_genres: user.top_music_genres,
             displayName: user.display_name,
             user_description: user.user_description,
