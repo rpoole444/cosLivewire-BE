@@ -55,7 +55,8 @@ artistRouter.post('/', upload.fields([
 
   const {
     display_name, bio, contact_email, genres, slug: customSlug,
-    embed_youtube, embed_soundcloud, embed_bandcamp, website, is_pro
+    embed_youtube, embed_soundcloud, embed_bandcamp,tip_jar_url,
+    website, is_pro
   } = req.body;
 
   const user_id = req.user?.id;
@@ -140,6 +141,7 @@ artistRouter.put('/:slug', upload.fields([
       embed_youtube: req.body.embed_youtube,
       embed_soundcloud: req.body.embed_soundcloud,
       embed_bandcamp: req.body.embed_bandcamp,
+      tip_jar_url: req.body.tip_jar_url,
       genres: Array.isArray(req.body.genres) ? req.body.genres : JSON.parse(req.body.genres),
     };
     
