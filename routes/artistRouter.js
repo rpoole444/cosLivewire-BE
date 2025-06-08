@@ -82,13 +82,23 @@ artistRouter.post('/', upload.fields([
       embed_youtube,
       embed_soundcloud,
       embed_bandcamp,
+      tip_jar_url,
       website,
       is_pro: true, // Always start as pro during trial
       trial_active: true,
       trial_start_date: new Date()
     });
     
+const existingUser = await knex('users').where({ id: user_id }).first();
 
+if (!existingUser.trial_ends_at) {
+  const trialEndsAt = new Date();
+  trialEndsAt.setDate(trialEndsAt.getDate() + 30); // 30-day trial
+
+  await knex('users')
+    .where({ id: user_id })
+    .update({ trial_ends_at: trialEndsAt });
+}
     res.status(201).json(newArtist);
   } catch (err) {
     console.error('Create artist error:', err);

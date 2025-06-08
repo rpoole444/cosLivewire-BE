@@ -187,6 +187,7 @@ authRouter.get('/session', (req, res) => {
         email: req.user.email,
         is_admin: req.user.is_admin,
         is_pro: req.user.is_pro,
+        trial_ends_at: req.user.trial_ends_at, 
         displayName: req.user.display_name,
         top_music_genres: req.user.top_music_genres,
         user_description: req.user.user_description
@@ -238,7 +239,8 @@ authRouter.post('/login', (req, res, next) => {
             email: user.email, 
             is_logged_in: user.is_logged_in, 
             is_admin: user.is_admin,
-            is_pro: user.is_pro, // ✅ ADD THIS LINE
+            is_pro: user.is_pro,
+            trial_ends_at: user.trial_ends_at, // ✅ add this
             top_music_genres: user.top_music_genres,
             displayName: user.display_name,
             user_description: user.user_description,

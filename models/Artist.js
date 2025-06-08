@@ -12,9 +12,10 @@ const Artist = {
       .orderBy('display_name');
   },
   findBySlugWithEvents: async (slug) => {
-    const artist = await knex('artists')
-      .select('*') // 👈 ensures user_id is included
-      .where({ slug })
+    const artist = await knex('artists as a')
+      .select('a.*', 'u.trial_ends_at', 'u.is_pro') // include trial + subscription info
+      .leftJoin('users as u', 'a.user_id', 'u.id')
+      .where('a.slug', slug)
       .first();
   
     if (!artist) return null;
@@ -24,19 +25,17 @@ const Artist = {
       .andWhere('date', '>=', new Date())
       .orderBy('date');
   
-      const isTrialExpired = (start) => {
-        const diffInDays = (new Date() - new Date(start)) / (1000 * 60 * 60 * 24);
-        return diffInDays > 30;
-      };
-      
-      
-      return {
-        ...artist,
-        events,
-        trial_expired: isTrialExpired(artist.trial_start_date)
-      };
-    },
+    const isTrialExpired = artist.trial_ends_at
+      ? new Date() > new Date(artist.trial_ends_at)
+      : true;
   
+    return {
+      ...artist,
+      events,
+      trial_expired: isTrialExpired,
+    };
+  },
+
   findByUserId: async (user_id) => {
     return knex('artists').where({ user_id }).first();
   },
