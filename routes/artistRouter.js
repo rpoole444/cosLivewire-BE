@@ -178,5 +178,30 @@ artistRouter.put('/:slug', upload.fields([
   }
 });
 
+artistRouter.delete('/:slug', async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { slug } = req.params;
+  const artist = await Artist.findBySlug(slug);
+
+  if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+  if (artist.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  try {
+    await knex('artists')
+      .where({ slug })
+      .update({ deleted_at: new Date() });
+
+    res.status(200).json({ message: 'Artist soft-deleted' });
+  } catch (err) {
+    console.error('Soft delete error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 
 module.exports = artistRouter;
