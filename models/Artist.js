@@ -32,9 +32,11 @@ const Artist = {
       .andWhere('date', '>=', new Date())
       .orderBy('date');
 
-    const isTrialExpired = artist.trial_ends_at
-      ? new Date() > new Date(artist.trial_ends_at)
-      : true;
+      const isTrialExpired =
+      artist.trial_ends_at !== null
+        ? new Date() > new Date(artist.trial_ends_at)
+        : false;
+    
 
     return {
       ...artist,
