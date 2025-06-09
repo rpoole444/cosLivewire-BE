@@ -41,8 +41,8 @@ router.post('/create-tip-session', async (req, res) => {
         purpose: 'support',
         type: mode,
       },
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=tip`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?cancelled=tip`,
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?cancelled=true`,
     });
 
     return res.status(200).json({ url: session.url });
