@@ -122,6 +122,105 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
   }
 });
 
+/**
+ * Submit multiple events in a single request
+ */
+eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) => {
+  if (!req.isAuthenticated?.()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  try {
+    const eventsPayload = req.body.events ? JSON.parse(req.body.events) : [];
+    const files = req.files || [];
+
+    if (!Array.isArray(eventsPayload) || eventsPayload.length === 0) {
+      return res.status(400).json({ message: 'No events provided' });
+    }
+
+    const insertedAll = [];
+    for (let i = 0; i < eventsPayload.length; i++) {
+      const event = eventsPayload[i];
+      const posterFile = files[i];
+
+      let {
+        user_id,
+        title,
+        description,
+        location,
+        address,
+        date,
+        genre,
+        age_restriction,
+        website_link,
+        venue_name,
+        website,
+        start_time,
+        end_time,
+        ticket_price,
+        recurrenceDates,
+      } = event;
+
+      const posterUrl = posterFile ? posterFile.location : null;
+
+      if (typeof ticket_price === 'string') {
+        ticket_price = parseFloat(ticket_price.replace(/[^\d.]/g, ''));
+      }
+      if (isNaN(ticket_price)) ticket_price = null;
+
+      const slug = await generateUniqueSlug(title);
+
+      const baseEventData = {
+        user_id,
+        title,
+        description,
+        location,
+        address,
+        genre,
+        ticket_price,
+        age_restriction,
+        website_link,
+        venue_name,
+        website,
+        start_time,
+        end_time,
+        slug,
+        poster: posterUrl,
+      };
+
+      let insertedEvents;
+      if (recurrenceDates) {
+        const parsed = Array.isArray(recurrenceDates)
+          ? recurrenceDates
+          : JSON.parse(recurrenceDates);
+        insertedEvents = await createRecurringEvents(baseEventData, parsed);
+      } else {
+        insertedEvents = await createEvent({ ...baseEventData, date });
+      }
+
+      insertedAll.push(
+        ...(Array.isArray(insertedEvents) ? insertedEvents : [insertedEvents])
+      );
+    }
+
+    try {
+      if (insertedAll[0]) {
+        await sendEventReceiptEmail(insertedAll[0], req.user.email);
+      }
+    } catch (mailErr) {
+      console.error('Receipt e‑mail failed:', mailErr);
+    }
+
+    res.status(201).json({
+      events: insertedAll,
+      message: 'Event(s) submitted successfully.',
+    });
+  } catch (error) {
+    console.error('Error submitting event(s):', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 
 /**
  * Fetch events pending review
