@@ -14,7 +14,8 @@ Follow these steps to get the backend server running locally:
    git clone [https://github.com/rpoole444/cosLivewire-BE]
 2. cd coslivewire-be
 3. npm install
-4. node app.js
+4. npm run migrate # apply database migrations
+5. node app.js
    - this will start the server locally
      
  ## Features

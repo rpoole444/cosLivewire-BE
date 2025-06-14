@@ -38,26 +38,6 @@ artistRouter.get('/public-list', async (req, res) => {
   }
 });
 
-// GET artist by slug (public-facing profile)
-artistRouter.get('/:slug', async (req, res) => {
-  try {
-    const artist = await Artist.findBySlugWithEvents(req.params.slug);
-    if (!artist) return res.status(404).json({ message: 'Artist not found' });
-
-    // Only show unapproved profiles to owners or admins
-    const isOwnerOrAdmin =
-      req.isAuthenticated?.() &&
-      (req.user?.id === artist.user_id || req.user?.is_admin);
-    if (!artist.is_approved && !isOwnerOrAdmin) {
-      return res.status(403).json({ message: 'Artist pending approval' });
-    }
-
-    res.json(artist);
-  } catch (err) {
-    console.error('Error fetching artist:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
 
 // POST create artist profile
 artistRouter.post('/', upload.fields([
@@ -142,89 +122,6 @@ artistRouter.get('/user/:id', async (req, res) => {
   }
 });
 
-// PUT /api/artists/:slug — update artist profile
-artistRouter.put('/:slug', upload.fields([
-    { name: 'profile_image', maxCount: 1 },
-    { name: 'promo_photo', maxCount: 1 },
-    { name: 'stage_plot', maxCount: 1 },
-    { name: 'press_kit', maxCount: 1 },
-  ]),
-  async (req, res) => {
-  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
-
-  const { slug } = req.params;
-  const artist = await Artist.findBySlug(slug);
-  if (!artist) return res.status(404).json({ message: 'Artist not found' });
-
-  // Ownership check
-  if (artist.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ message: 'Not authorized' });
-  }
-
-  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
-    return res.status(403).json({ message: 'Trial expired. Upgrade to edit your profile.' });
-  }
-
-  try {
-    const updatedFields = {
-      display_name: req.body.display_name,
-      bio: req.body.bio,
-      contact_email: req.body.contact_email,
-      website: req.body.website,
-      is_pro: req.body.is_pro === 'true',
-      embed_youtube: req.body.embed_youtube,
-      embed_soundcloud: req.body.embed_soundcloud,
-      embed_bandcamp: req.body.embed_bandcamp,
-      tip_jar_url: req.body.tip_jar_url,
-      genres: Array.isArray(req.body.genres) ? req.body.genres : JSON.parse(req.body.genres),
-    };
-    
-    // Optional file updates
-    if (req.file) {
-      updatedFields.profile_image = req.file.location;
-    }
-    if (req.files?.promo_photo?.[0]) {
-      updatedFields.promo_photo = req.files.promo_photo[0].location;
-    }
-    if (req.files?.stage_plot?.[0]) {
-      updatedFields.stage_plot = req.files.stage_plot[0].location;
-    }
-    if (req.files?.press_kit?.[0]) {
-      updatedFields.press_kit = req.files.press_kit[0].location;
-    }
-    
-
-    const updated = await Artist.update(slug, updatedFields);
-    res.json(updated);
-  } catch (err) {
-    console.error('Error updating artist:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-artistRouter.delete('/:slug', async (req, res) => {
-  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
-
-  const { slug } = req.params;
-  const artist = await Artist.findBySlug(slug);
-
-  if (!artist) return res.status(404).json({ message: 'Artist not found' });
-
-  if (artist.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
-
-  try {
-    await knex('artists')
-      .where({ slug })
-      .update({ deleted_at: new Date() });
-
-    res.status(200).json({ message: 'Artist soft-deleted' });
-  } catch (err) {
-    console.error('Soft delete error:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
 artistRouter.put('/by-user/:userId/restore', async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
 
@@ -302,6 +199,111 @@ artistRouter.put('/:id/decline', isAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to decline artist.' });
+  }
+});
+
+// PUT /api/artists/:slug — update artist profile
+artistRouter.put('/:slug', upload.fields([
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'promo_photo', maxCount: 1 },
+    { name: 'stage_plot', maxCount: 1 },
+    { name: 'press_kit', maxCount: 1 },
+  ]),
+  async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { slug } = req.params;
+  const artist = await Artist.findBySlug(slug);
+  if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+  // Ownership check
+  if (artist.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
+    return res.status(403).json({ message: 'Trial expired. Upgrade to edit your profile.' });
+  }
+
+  try {
+    const updatedFields = {
+      display_name: req.body.display_name,
+      bio: req.body.bio,
+      contact_email: req.body.contact_email,
+      website: req.body.website,
+      is_pro: req.body.is_pro === 'true',
+      embed_youtube: req.body.embed_youtube,
+      embed_soundcloud: req.body.embed_soundcloud,
+      embed_bandcamp: req.body.embed_bandcamp,
+      tip_jar_url: req.body.tip_jar_url,
+      genres: Array.isArray(req.body.genres) ? req.body.genres : JSON.parse(req.body.genres),
+    };
+
+    // Optional file updates
+    if (req.file) {
+      updatedFields.profile_image = req.file.location;
+    }
+    if (req.files?.promo_photo?.[0]) {
+      updatedFields.promo_photo = req.files.promo_photo[0].location;
+    }
+    if (req.files?.stage_plot?.[0]) {
+      updatedFields.stage_plot = req.files.stage_plot[0].location;
+    }
+    if (req.files?.press_kit?.[0]) {
+      updatedFields.press_kit = req.files.press_kit[0].location;
+    }
+
+
+    const updated = await Artist.update(slug, updatedFields);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating artist:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.delete('/:slug', async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { slug } = req.params;
+  const artist = await Artist.findBySlug(slug);
+
+  if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+  if (artist.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  try {
+    await knex('artists')
+      .where({ slug })
+      .update({ deleted_at: new Date() });
+
+    res.status(200).json({ message: 'Artist soft-deleted' });
+  } catch (err) {
+    console.error('Soft delete error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET artist by slug (public-facing profile)
+artistRouter.get('/:slug', async (req, res) => {
+  try {
+    const artist = await Artist.findBySlugWithEvents(req.params.slug);
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    // Only show unapproved profiles to owners or admins
+    const isOwnerOrAdmin =
+      req.isAuthenticated?.() &&
+      (req.user?.id === artist.user_id || req.user?.is_admin);
+    if (!artist.is_approved && !isOwnerOrAdmin) {
+      return res.status(403).json({ message: 'Artist pending approval' });
+    }
+
+    res.json(artist);
+  } catch (err) {
+    console.error('Error fetching artist:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
