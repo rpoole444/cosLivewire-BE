@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcryptjs');
 const passport = require('passport');
+const isInTrial = require('../utils/isInTrial');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
@@ -187,11 +188,12 @@ authRouter.get('/session', (req, res) => {
         email: req.user.email,
         is_admin: req.user.is_admin,
         is_pro: req.user.is_pro,
-        trial_ends_at: req.user.trial_ends_at, 
+        trial_active: isInTrial(req.user.trial_ends_at),
+        trial_ends_at: req.user.trial_ends_at,
         displayName: req.user.display_name,
         top_music_genres: req.user.top_music_genres,
         user_description: req.user.user_description
-      } 
+      }
     });
   } else {
     return res.json({ isLoggedIn: false, user: null });
@@ -232,15 +234,16 @@ authRouter.post('/login', (req, res, next) => {
         await updateUserLoginStatus(user.id, true);
         res.json({
           message: 'Logged in successfully',
-          user: { 
-            id: user.id, 
-            first_name: user.first_name, 
-            last_name: user.last_name, 
-            email: user.email, 
-            is_logged_in: user.is_logged_in, 
+          user: {
+            id: user.id,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            email: user.email,
+            is_logged_in: user.is_logged_in,
             is_admin: user.is_admin,
             is_pro: user.is_pro,
-            trial_ends_at: user.trial_ends_at, // ✅ add this
+            trial_active: isInTrial(user.trial_ends_at),
+            trial_ends_at: user.trial_ends_at,
             top_music_genres: user.top_music_genres,
             displayName: user.display_name,
             user_description: user.user_description,

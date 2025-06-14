@@ -1,3 +1,4 @@
+
 function isInTrial(trialEndsAt, isPro = false) {
   if (isPro) return true;
   if (!trialEndsAt) return true;
@@ -5,3 +6,4 @@ function isInTrial(trialEndsAt, isPro = false) {
 }
 
 module.exports = isInTrial;
+

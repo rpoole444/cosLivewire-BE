@@ -1,6 +1,7 @@
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
+const isInTrial = require('../utils/isInTrial');
 
 const Artist = {
   findBySlug: async (slug) => {
@@ -33,9 +34,7 @@ const Artist = {
       .orderBy('date');
 
       const isTrialExpired =
-      artist.trial_ends_at !== null
-        ? new Date() > new Date(artist.trial_ends_at)
-        : false;
+        artist.trial_ends_at !== null ? !isInTrial(artist.trial_ends_at) : false;
     
 
     return {
