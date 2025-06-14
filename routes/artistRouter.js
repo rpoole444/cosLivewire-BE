@@ -210,6 +210,30 @@ artistRouter.delete('/:slug', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+artistRouter.put('/by-user/:userId/restore', async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { userId } = req.params;
+
+  try {
+    const artist = await knex('artists')
+      .where({ user_id: userId })
+      .andWhereNotNull('deleted_at')
+      .first();
+
+    if (!artist) return res.status(404).json({ message: 'No deleted artist profile found for user.' });
+
+    const [restored] = await knex('artists')
+      .where({ id: artist.id })
+      .update({ deleted_at: null })
+      .returning('*');
+
+    res.json(restored);
+  } catch (err) {
+    console.error('Restore error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // PUT /api/artists/:id/restore — restore soft-deleted artist profile
 artistRouter.put('/:id/restore', async (req, res) => {
