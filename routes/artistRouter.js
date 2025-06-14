@@ -37,7 +37,20 @@ artistRouter.get('/public-list', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+artistRouter.get('/pending', async (req, res) => {
+  try {
+    const pendingArtists = await knex('artists')
+      .where({ is_approved: false })
+      .whereNull('deleted_at');
 
+    console.log('Pending artists fetched:', pendingArtists.length, pendingArtists.map(a => a.slug));
+
+    res.json(pendingArtists);
+  } catch (err) {
+    console.error('Error fetching pending artists:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {
   try {
@@ -267,22 +280,6 @@ artistRouter.put('/:id/restore', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-artistRouter.get('/pending', async (req, res) => {
-  try {
-    const pendingArtists = await knex('artists')
-      .where({ is_approved: false })
-      .whereNull('deleted_at');
-
-    console.log('Pending artists fetched:', pendingArtists.length, pendingArtists.map(a => a.slug));
-
-    res.json(pendingArtists);
-  } catch (err) {
-    console.error('Error fetching pending artists:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
 
 artistRouter.put('/:id/approve', isAdmin, async (req, res) => {
   const { id } = req.params;
