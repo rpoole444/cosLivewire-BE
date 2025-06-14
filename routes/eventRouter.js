@@ -9,6 +9,7 @@ const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const slugify = require("../utils/slugify")
 const generateUniqueSlug = require('../utils/generateUniqueSlug');
+const isInTrial = require('../utils/isInTrial');
 
 const {
   deleteEvent,
@@ -45,6 +46,10 @@ const eventRouter = express.Router();
 eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
   if (!req.isAuthenticated?.()) {
     return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  if (!isInTrial(req.user.trial_ends_at)) {
+    return res.status(403).json({ message: 'Trial expired. Upgrade to submit events.' });
   }
 
   try {
@@ -129,6 +134,10 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
 eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) => {
   if (!req.isAuthenticated?.()) {
     return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  if (!isInTrial(req.user.trial_ends_at)) {
+    return res.status(403).json({ message: 'Trial expired. Upgrade to submit events.' });
   }
 
   try {
