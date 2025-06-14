@@ -146,7 +146,7 @@ artistRouter.put('/:slug', upload.fields([
     return res.status(403).json({ message: 'Not authorized' });
   }
 
-  if (!isInTrial(req.user.trial_ends_at)) {
+  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
     return res.status(403).json({ message: 'Trial expired. Upgrade to edit your profile.' });
   }
 

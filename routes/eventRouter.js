@@ -48,7 +48,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
-  if (!isInTrial(req.user.trial_ends_at)) {
+  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
     return res.status(403).json({ message: 'Trial expired. Upgrade to submit events.' });
   }
 
@@ -136,7 +136,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
-  if (!isInTrial(req.user.trial_ends_at)) {
+  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
     return res.status(403).json({ message: 'Trial expired. Upgrade to submit events.' });
   }
 
