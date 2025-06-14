@@ -131,6 +131,10 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
+  if (!req.user.is_pro) {
+    return res.status(403).json({ message: 'Pro membership required for multiple event submission.' });
+  }
+
   try {
     const eventsPayload = req.body.events ? JSON.parse(req.body.events) : [];
     const files = req.files || [];

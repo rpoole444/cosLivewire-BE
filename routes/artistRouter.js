@@ -8,6 +8,7 @@ const multerS3 = require('multer-s3');
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
+const isInTrial = require('../utils/isInTrial');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
 
@@ -143,6 +144,10 @@ artistRouter.put('/:slug', upload.fields([
   // Ownership check
   if (artist.user_id !== req.user.id && !req.user.is_admin) {
     return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
+    return res.status(403).json({ message: 'Trial expired. Upgrade to edit your profile.' });
   }
 
   try {

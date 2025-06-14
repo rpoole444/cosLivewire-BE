@@ -1,3 +1,9 @@
-const dayjs = require('dayjs');
 
-module.exports = trialEnd => dayjs().isBefore(dayjs(trialEnd));
+function isInTrial(trialEndsAt, isPro = false) {
+  if (isPro) return true;
+  if (!trialEndsAt) return true;
+  return new Date() <= new Date(trialEndsAt);
+}
+
+module.exports = isInTrial;
+
