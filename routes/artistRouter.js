@@ -268,11 +268,11 @@ artistRouter.put('/:id/restore', async (req, res) => {
   }
 });
 
-artistRouter.get('/pending', isAdmin, async (req, res) => {
+artistRouter.get('/pending', async (req, res) => {
   try {
     const pendingArtists = await knex('artists')
       .where({ is_approved: false })
-      .andWhereNull('deleted_at');
+      .whereNull('deleted_at');
 
     console.log('Pending artists fetched:', pendingArtists.length, pendingArtists.map(a => a.slug));
 
