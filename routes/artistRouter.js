@@ -258,6 +258,26 @@ artistRouter.put('/:id/restore', async (req, res) => {
   }
 });
 
+artistRouter.get('/pending', isAdmin, async (req, res) => {
+  const pendingArtists = await knex('artists').where({ is_approved: false });
+  res.json(pendingArtists);
+});
+
+artistRouter.put('/:id/approve', isAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [updated] = await knex('artists')
+      .where({ id })
+      .update({ is_approved: true })
+      .returning('*');
+
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to approve artist.' });
+  }
+});
 
 
 module.exports = artistRouter;
