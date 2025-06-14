@@ -159,6 +159,21 @@ const clearUserResetToken = async (userId) => {
     });
 };
 
+const startTrial = async (userId) => {
+  const trialEndsAt = new Date();
+  trialEndsAt.setDate(trialEndsAt.getDate() + 30);
+
+  const [updatedUser] = await knex('users')
+    .where({ id: userId })
+    .update({
+      trial_ends_at: trialEndsAt,
+      trial_active: true,
+    })
+    .returning('*');
+
+  return updatedUser;
+};
+
 
 module.exports = {
   getAllUsers,
@@ -176,5 +191,6 @@ module.exports = {
   updateUserProfilePicture,
   deleteProfilePicture,
   getProfilePictureUrl,
-  deleteUser
+  deleteUser,
+  startTrial
 }
