@@ -20,6 +20,7 @@ Follow these steps to get the backend server running locally:
  ## Features
 - **User Authentication**: Secure authentication mechanisms for different user roles.
 - **Event Management**: Users can create, store, and manage events seamlessly.
+- **Artist Review Process**: Newly created artist profiles require admin approval before they appear publicly.
 - **Batch Event Submission**: Submit multiple events in a single request using
   `POST /events/submit-multiple`.
 - **Robust Database Integration**: A comprehensive database setup to ensure data integrity and fast access.
