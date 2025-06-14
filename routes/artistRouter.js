@@ -68,8 +68,10 @@ artistRouter.post('/', upload.fields([
   const slug = customSlug ? customSlug.toLowerCase().replace(/\s+/g, '-') : display_name.toLowerCase().replace(/\s+/g, '-');
 
   try {
-    const exists = await Artist.findBySlug(slug);
-    if (exists) return res.status(409).json({ message: 'Slug is taken' });
+    const exists = await Artist.slugExists(slug);
+    if (exists) {
+      return res.status(409).json({ message: 'An artist with that slug already exists' });
+    }
 
     const files = req.files;
 
@@ -106,6 +108,9 @@ if (!existingUser.trial_ends_at) {
 }
     res.status(201).json(newArtist);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'An artist with that slug already exists' });
+    }
     console.error('Create artist error:', err);
     res.status(500).json({ message: 'Server error' });
   }
