@@ -11,6 +11,14 @@ const Artist = {
       .first();
   },
 
+  // Check if a slug exists regardless of soft deletion
+  slugExists: async (slug) => {
+    const existing = await knex('artists')
+      .where({ slug })
+      .first();
+    return !!existing;
+  },
+
   findAllPublic: async () => {
     return knex('artists')
       .select('display_name', 'slug', 'profile_image', 'genres', 'bio')
