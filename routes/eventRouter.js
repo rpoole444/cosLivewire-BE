@@ -63,6 +63,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       start_time,
       end_time,
       recurrenceDates,
+      slug: providedSlug,
     } = req.body;
 
     // poster URL (or null)
@@ -74,7 +75,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       ticket_price = parseFloat(ticket_price.replace(/[^\d.]/g, ''));
     }
     if (isNaN(ticket_price)) ticket_price = null;
-    const slug =  await generateUniqueSlug(title);
+    const slug = providedSlug || await generateUniqueSlug(title);
 
     const baseEventData = {
       user_id,
@@ -159,6 +160,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
         end_time,
         ticket_price,
         recurrenceDates,
+        slug: providedSlug,
       } = event;
 
       const posterUrl = posterFile ? posterFile.location : null;
@@ -168,7 +170,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
       }
       if (isNaN(ticket_price)) ticket_price = null;
 
-      const slug = await generateUniqueSlug(title);
+      const slug = providedSlug || await generateUniqueSlug(title);
 
       const baseEventData = {
         user_id,

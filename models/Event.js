@@ -3,6 +3,7 @@ const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
 const { v4: uuidv4 } = require('uuid');
+const slugify = require('../utils/slugify');
 
  // Adjust the path as necessary for your project structure
 
@@ -12,11 +13,13 @@ const createEvent = async (eventData) => {
 
 const createRecurringEvents = async (baseEventData, recurrenceDates) => {
   const recurring_group_id = uuidv4();
+  const baseSlug = baseEventData.slug || slugify(baseEventData.title);
 
   const eventsToInsert = recurrenceDates.map((recurrenceDate) => ({
     ...baseEventData,
     date: recurrenceDate,
     recurring_group_id,
+    slug: `${baseSlug}-${uuidv4()}`,
   }));
 
   return knex('events').insert(eventsToInsert).returning('*');
