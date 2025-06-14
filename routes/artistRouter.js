@@ -223,7 +223,7 @@ artistRouter.put('/by-user/:userId/restore', async (req, res) => {
   try {
     const artist = await knex('artists')
       .where({ user_id: userId })
-      .andWhereNotNull('deleted_at')
+      .andWhere('deleted_at', 'is not', null)
       .first();
 
     if (!artist) return res.status(404).json({ message: 'No deleted artist profile found for user.' });
