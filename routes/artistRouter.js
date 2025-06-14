@@ -9,6 +9,7 @@ const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
 const isInTrial = require('../utils/isInTrial');
+const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
 
