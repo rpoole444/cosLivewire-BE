@@ -43,6 +43,15 @@ artistRouter.get('/:slug', async (req, res) => {
   try {
     const artist = await Artist.findBySlugWithEvents(req.params.slug);
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    // Only show unapproved profiles to owners or admins
+    const isOwnerOrAdmin =
+      req.isAuthenticated?.() &&
+      (req.user?.id === artist.user_id || req.user?.is_admin);
+    if (!artist.is_approved && !isOwnerOrAdmin) {
+      return res.status(403).json({ message: 'Artist pending approval' });
+    }
+
     res.json(artist);
   } catch (err) {
     console.error('Error fetching artist:', err);
@@ -277,6 +286,22 @@ artistRouter.put('/:id/approve', isAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to approve artist.' });
+  }
+});
+
+artistRouter.put('/:id/decline', isAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [updated] = await knex('artists')
+      .where({ id })
+      .update({ is_approved: false })
+      .returning('*');
+
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to decline artist.' });
   }
 });
 
