@@ -9,6 +9,7 @@ const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const slugify = require("../utils/slugify")
 const generateUniqueSlug = require('../utils/generateUniqueSlug');
+const isAdmin = require('../utils/isAdmin');
 
 const {
   deleteEvent,
@@ -231,7 +232,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
 /**
  * Fetch events pending review
  */
-eventRouter.get('/review', async (req, res) => {
+eventRouter.get('/review', isAdmin, async (req, res) => {
   try {
     const events = await getEventsForReview();
     res.json(events);
@@ -244,7 +245,7 @@ eventRouter.get('/review', async (req, res) => {
 /**
  * Update event status (approve/deny)
  */
-eventRouter.put('/review/:eventId', async (req, res) => {
+eventRouter.put('/review/:eventId', isAdmin, async (req, res) => {
   try {
     const { eventId }  = req.params;
     const { isApproved } = req.body;
