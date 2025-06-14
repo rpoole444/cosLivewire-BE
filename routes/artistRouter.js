@@ -211,6 +211,24 @@ artistRouter.delete('/:slug', async (req, res) => {
   }
 });
 
+// PUT /api/artists/:id/restore — restore soft-deleted artist profile
+artistRouter.put('/:id/restore', async (req, res) => {
+  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
+
+  const { id } = req.params;
+
+  try {
+    const restored = await Artist.restore(id);
+    if (!restored) {
+      return res.status(404).json({ message: 'Artist not found' });
+    }
+    res.json(restored);
+  } catch (err) {
+    console.error('Restore artist error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 
 module.exports = artistRouter;

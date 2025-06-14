@@ -65,6 +65,14 @@ const Artist = {
       .update(updates)
       .returning('*');
     return updated;
+  },
+
+  restore: async (id) => {
+    const [restored] = await knex('artists')
+      .where({ id })
+      .update({ deleted_at: null })
+      .returning('*');
+    return restored;
   }
 };
 
