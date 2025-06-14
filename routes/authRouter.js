@@ -8,7 +8,7 @@ const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
-const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser } = require('../models/User');
+const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
 
 const authRouter = express.Router();
 
@@ -197,6 +197,31 @@ authRouter.get('/session', (req, res) => {
     });
   } else {
     return res.json({ isLoggedIn: false, user: null });
+  }
+});
+
+// Start a user's trial
+authRouter.post('/start-trial', async (req, res) => {
+  if (!req.isAuthenticated?.()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  try {
+    const user = await findUserById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (user.trial_ends_at) {
+      return res.status(400).json({ message: 'Trial already used' });
+    }
+
+    const updatedUser = await startTrial(user.id);
+    res.json(updatedUser);
+  } catch (error) {
+    console.error('Error starting trial:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
