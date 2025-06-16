@@ -7,7 +7,8 @@ const session = require('express-session');
 const passport = require('passport');
 const cors = require('cors');
 const { createClient } = require('redis');
-const { RedisStore } = require('connect-redis'); 
+const { RedisStore } = require('connect-redis');
+const bodyParser = require('body-parser');
 const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
@@ -39,6 +40,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+// Raw body parser for Stripe webhooks must come before express.json
+app.use('/api/payments/webhook', bodyParser.raw({ type: 'application/json' }));
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));

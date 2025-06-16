@@ -52,6 +52,50 @@ router.post('/create-tip-session', async (req, res) => {
   }
 });
 
+// Create a subscription checkout session
+router.post('/create-checkout-session', async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ message: 'Missing userId' });
+  }
+
+  try {
+    const user = await knex('users').where({ id: userId }).first();
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      customer_email: user.email,
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: 999,
+            product_data: {
+              name: 'Pro Subscription',
+              description: 'Monthly access to Alpine Groove Guide Pro features.'
+            },
+            recurring: { interval: 'month' }
+          },
+          quantity: 1
+        }
+      ],
+      metadata: { user_id: userId },
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?success=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?canceled=true`
+    });
+
+    return res.status(200).json({ url: session.url });
+  } catch (err) {
+    console.error('Stripe subscription session error:', err.message);
+    return res.status(500).json({ message: 'Failed to create checkout session' });
+  }
+});
+
 // Stripe webhook route
 router.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -66,17 +110,16 @@ router.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const email = session.customer_email;
     const mode = session.mode;
+    const userId = session.metadata && session.metadata.user_id;
 
     try {
-      if (mode === 'subscription') {
-        // 🎯 Update the user as pro in your DB
-        const updated = await knex('users').where({ email }).update({ is_pro: true });
+      if (mode === 'subscription' && userId) {
+        const updated = await knex('users').where({ id: userId }).update({ is_pro: true });
         if (updated) {
-          console.log(`✅ Updated is_pro = true for user ${email}`);
+          console.log(`✅ Updated is_pro = true for user ${userId}`);
         } else {
-          console.warn(`⚠️ No user found with email ${email}`);
+          console.warn(`⚠️ No user found with id ${userId}`);
         }
       }
     } catch (dbErr) {
