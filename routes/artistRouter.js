@@ -5,7 +5,8 @@ const knex = require('knex')(config);
 const express = require('express');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
-const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
 const isInTrial = require('../utils/isInTrial');
@@ -51,6 +52,46 @@ artistRouter.get('/pending', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+// Get signed URL for private media files
+artistRouter.get('/:slug/media/:field', async (req, res) => {
+  const { slug, field } = req.params;
+  const allowed = ['press_kit', 'promo_photo', 'stage_plot'];
+  if (!allowed.includes(field)) {
+    return res.status(400).json({ message: 'Invalid media type' });
+  }
+
+  try {
+    const artist = await Artist.findBySlug(slug);
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    const fileUrl = artist[field];
+    if (!fileUrl) return res.status(404).json({ message: 'File not found' });
+
+    const isOwnerOrAdmin =
+      req.isAuthenticated?.() &&
+      (req.user?.id === artist.user_id || req.user?.is_admin);
+
+    if (!artist.is_approved && !isOwnerOrAdmin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const key = fileUrl.split('.amazonaws.com/')[1];
+    if (!key) {
+      return res.status(500).json({ message: 'Invalid file location' });
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key,
+    });
+    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+    res.json({ url: signedUrl });
+  } catch (err) {
+    console.error('Error fetching media file:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {
   try {
@@ -281,7 +322,11 @@ artistRouter.put('/:id/restore', async (req, res) => {
   }
 });
 
-artistRouter.put('/:id/approve', isAdmin, async (req, res) => {
+artistRouter.put('/:id/approve', async (req, res) => {
+  if (!req.isAuthenticated?.() || !req.user?.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
   const { id } = req.params;
 
   try {
