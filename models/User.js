@@ -166,8 +166,7 @@ const startTrial = async (userId) => {
   const [updatedUser] = await knex('users')
     .where({ id: userId })
     .update({
-      trial_ends_at: trialEndsAt,
-      trial_active: true,
+      trial_ends_at: trialEndsAt
     })
     .returning('*');
 
