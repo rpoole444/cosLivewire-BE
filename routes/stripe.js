@@ -1,10 +1,8 @@
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config)
 const express = require('express');
 const Stripe = require('stripe');
 const router = express.Router();
 const bodyParser = require('body-parser');
+const knex = require('../db/knex');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
