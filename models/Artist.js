@@ -37,14 +37,17 @@ const Artist = {
 
     if (!artist) return null;
 
-    const events = await knex('events')
-      .where({ user_id: artist.user_id })
-      .andWhere('date', '>=', new Date())
-      .orderBy('date');
+    const events = artist.user_id
+      ? await knex('events')
+          .where({ user_id: artist.user_id })
+          .andWhere('date', '>=', new Date())
+          .orderBy('date')
+      : [];
 
-      const isTrialExpired =
-        artist.trial_ends_at !== null ? !isInTrial(artist.trial_ends_at) : false;
-    
+    const isTrialExpired = artist.trial_ends_at
+      ? !isInTrial(artist.trial_ends_at, artist.is_pro)
+      : false;
+
 
     return {
       ...artist,

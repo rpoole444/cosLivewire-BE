@@ -56,6 +56,15 @@ const updateUser = async (id, userData, profilePictureUrl) => {
 
 const deleteUser = async (userId) => {
   try {
+    // Null out the artist reference and contact details
+    await knex('artists')
+      .where({ user_id: userId })
+      .update({
+        user_id: null,
+        contact_email: null,
+        website: null,
+      });
+
     const [user] = await knex('users')
       .where({ id: userId })
       .del()
