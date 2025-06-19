@@ -52,13 +52,23 @@ router.post('/create-tip-session', async (req, res) => {
 
 // Create a subscription checkout session
 router.post('/create-checkout-session', async (req, res) => {
-  const { userId, priceId } = req.body;
+  const { userId, plan } = req.body;
 
-  if (!userId || !priceId) {
+  if (!userId || !plan) {
     return res
       .status(400)
-      .json({ message: 'Missing required data: userId and priceId' });
+      .json({ message: 'Missing required data: userId and plan' });
   }
+
+  const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
+  const annualPriceId = process.env.STRIPE_ANNUAL_PRICE_ID;
+
+  const priceId = plan === 'annual' ? annualPriceId : monthlyPriceId;
+
+  if (!priceId) {
+    return res.status(500).json({ message: `Missing Stripe price ID for ${plan} plan.` });
+  }
+
   try {
     const user = await knex('users').where({ id: userId }).first();
     if (!user) {
@@ -72,12 +82,12 @@ router.post('/create-checkout-session', async (req, res) => {
       line_items: [
         {
           price: priceId,
-          quantity: 1
-        }
+          quantity: 1,
+        },
       ],
-      metadata: { user_id: userId },
+      metadata: { user_id: userId, plan },
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?canceled=true`
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?canceled=true`,
     });
 
     return res.status(200).json({ url: session.url });
@@ -86,6 +96,7 @@ router.post('/create-checkout-session', async (req, res) => {
     return res.status(500).json({ message: 'Failed to create checkout session' });
   }
 });
+
 
 // Stripe webhook route
 router.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
