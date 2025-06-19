@@ -52,12 +52,13 @@ router.post('/create-tip-session', async (req, res) => {
 
 // Create a subscription checkout session
 router.post('/create-checkout-session', async (req, res) => {
-  const { userId } = req.body;
+  const { userId, priceId } = req.body;
 
-  if (!userId) {
-    return res.status(400).json({ message: 'Missing userId' });
+  if (!userId || !priceId) {
+    return res
+      .status(400)
+      .json({ message: 'Missing required data: userId and priceId' });
   }
-
   try {
     const user = await knex('users').where({ id: userId }).first();
     if (!user) {
@@ -70,15 +71,7 @@ router.post('/create-checkout-session', async (req, res) => {
       customer_email: user.email,
       line_items: [
         {
-          price_data: {
-            currency: 'usd',
-            unit_amount: 999,
-            product_data: {
-              name: 'Pro Subscription',
-              description: 'Monthly access to Alpine Groove Guide Pro features.'
-            },
-            recurring: { interval: 'month' }
-          },
+          price: priceId,
           quantity: 1
         }
       ],
