@@ -55,9 +55,7 @@ router.post('/create-checkout-session', async (req, res) => {
   const { userId, plan } = req.body;
 
   if (!userId || !plan) {
-    return res
-      .status(400)
-      .json({ message: 'Missing required data: userId and plan' });
+    return res.status(400).json({ message: 'Missing required data: userId and plan' });
   }
 
   const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
@@ -66,7 +64,7 @@ router.post('/create-checkout-session', async (req, res) => {
   const priceId = plan === 'annual' ? annualPriceId : monthlyPriceId;
 
   if (!priceId) {
-    return res.status(500).json({ message: `Missing Stripe price ID for ${plan} plan.` });
+    return res.status(500).json({ message: `Missing Stripe price ID for plan: ${plan}` });
   }
 
   try {
@@ -85,7 +83,10 @@ router.post('/create-checkout-session', async (req, res) => {
           quantity: 1,
         },
       ],
-      metadata: { user_id: userId, plan },
+      metadata: {
+        user_id: userId,
+        plan,
+      },
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?success=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?canceled=true`,
     });
@@ -96,6 +97,7 @@ router.post('/create-checkout-session', async (req, res) => {
     return res.status(500).json({ message: 'Failed to create checkout session' });
   }
 });
+
 
 
 // Stripe webhook route
