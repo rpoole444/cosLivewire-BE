@@ -53,6 +53,7 @@ router.post('/create-tip-session', async (req, res) => {
 // Create a subscription checkout session
 router.post('/create-checkout-session', async (req, res) => {
   const { userId, plan } = req.body;
+  console.log('BODY RECEIVED:', req.body);
 
   if (!userId || !plan) {
     return res.status(400).json({ message: 'Missing required data: userId and plan' });
