@@ -89,8 +89,8 @@ router.post('/create-checkout-session', async (req, res) => {
         user_id: userId,
         plan,
       },
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upgrade?canceled=true`,
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?canceled=true`,
     });
 
     return res.status(200).json({ url: session.url });
