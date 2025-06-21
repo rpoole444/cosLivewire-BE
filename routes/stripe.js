@@ -89,6 +89,7 @@ router.post('/create-checkout-session', async (req, res) => {
         user_id: userId,
         plan,
       },
+      automatic_tax: { enabled: true }, 
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?canceled=true`,
     });
