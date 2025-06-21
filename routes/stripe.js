@@ -39,6 +39,7 @@ router.post('/create-tip-session', async (req, res) => {
         purpose: 'support',
         type: mode,
       },
+      automatic_tax: { enabled: true }, 
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?cancelled=true`,
     });
