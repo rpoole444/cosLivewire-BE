@@ -2,10 +2,12 @@ const express = require('express');
 const Stripe = require('stripe');
 const router = express.Router();
 const knex = require('../db/knex');
+const webhookRouter = express.Router(); // << separate router
+const bodyParser = require('body-parser');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Create a checkout session for one-time or recurring tips
+// 🟣 Tip session
 router.post('/create-tip-session', async (req, res) => {
   const { email, mode, amount } = req.body;
 
@@ -103,7 +105,7 @@ router.post('/create-checkout-session', async (req, res) => {
 
 
 // Stripe webhook route
-router.post('/webhook', async (req, res) => {
+webhookRouter.post('/webhook',  bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -152,4 +154,7 @@ router.post('/webhook', async (req, res) => {
 });
 
 
-module.exports = router;
+module.exports = {
+  router,
+  webhookRouter,
+};

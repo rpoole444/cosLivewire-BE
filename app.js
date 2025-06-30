@@ -13,7 +13,7 @@ const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
 const artistRouter = require('./routes/artistRouter');
-const stripeRouter = require('./routes/stripe');
+const { router: stripeRouter, webhookRouter } = require('./routes/stripe');
 
 const { findUserByEmail, findUserById } = require('./models/User');
 
@@ -41,7 +41,7 @@ app.use(cors({
 }));
 
 // Raw body parser for Stripe webhooks must come before express.json
-app.use('/api/payments/webhook', bodyParser.raw({ type: 'application/json' }));
+app.use('/api/payments', webhookRouter);
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));
