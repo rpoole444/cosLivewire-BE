@@ -119,14 +119,21 @@ router.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req
     const session = event.data.object;
     const mode = session.mode;
     const userId = session.metadata && session.metadata.user_id;
+    const customerEmail = session.customer_email || (session.customer_details && session.customer_details.email);
 
     try {
-      if (mode === 'subscription' && userId) {
-        const updated = await knex('users').where({ id: userId }).update({ is_pro: true });
+      if (mode === 'subscription') {
+        let updated = 0;
+        if (customerEmail) {
+          updated = await knex('users').where({ email: customerEmail }).update({ is_pro: true });
+        } else if (userId) {
+          updated = await knex('users').where({ id: userId }).update({ is_pro: true });
+        }
+
         if (updated) {
-          console.log(`✅ Updated is_pro = true for user ${userId}`);
+          console.log(`✅ Updated is_pro for user ${customerEmail || userId}`);
         } else {
-          console.warn(`⚠️ No user found with id ${userId}`);
+          console.warn(`⚠️ No user found for email ${customerEmail} or id ${userId}`);
         }
       }
     } catch (dbErr) {
