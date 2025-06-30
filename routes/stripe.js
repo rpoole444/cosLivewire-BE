@@ -110,37 +110,46 @@ router.post('/webhook', async (req, res) => {
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Stripe Webhook signature verification failed:', err.message);
+    console.error('❌ Stripe signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
+
+  console.log('🔔 Stripe Event:', event.type);
+  console.log('🧾 Event Payload:', JSON.stringify(event, null, 2));
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const mode = session.mode;
-    const userId = session.metadata && session.metadata.user_id;
-    const customerEmail = session.customer_email || (session.customer_details && session.customer_details.email);
+    const userId = session.metadata?.user_id;
+    const customerEmail = session.customer_email || session.customer_details?.email;
 
     try {
+      let updated = 0;
+
       if (mode === 'subscription') {
-        let updated = 0;
         if (customerEmail) {
-          updated = await knex('users').where({ email: customerEmail }).update({ is_pro: true });
+          updated = await knex('users')
+            .whereRaw('LOWER(email) = ?', customerEmail.toLowerCase())
+            .update({ is_pro: true, trial_ends_at: null });
         } else if (userId) {
-          updated = await knex('users').where({ id: userId }).update({ is_pro: true });
+          updated = await knex('users')
+            .where({ id: userId })
+            .update({ is_pro: true, trial_ends_at: null });
         }
 
         if (updated) {
-          console.log(`✅ Updated is_pro for user ${customerEmail || userId}`);
+          console.log(`✅ Updated user ${customerEmail || userId} to is_pro = true`);
         } else {
           console.warn(`⚠️ No user found for email ${customerEmail} or id ${userId}`);
         }
       }
-    } catch (dbErr) {
-      console.error('❌ DB update failed:', dbErr.message);
+    } catch (err) {
+      console.error('❌ DB update error:', err.message);
     }
   }
 
   res.status(200).json({ received: true });
 });
+
 
 module.exports = router;
