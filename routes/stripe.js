@@ -1,7 +1,6 @@
 const express = require('express');
 const Stripe = require('stripe');
 const router = express.Router();
-const bodyParser = require('body-parser');
 const knex = require('../db/knex');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -104,7 +103,7 @@ router.post('/create-checkout-session', async (req, res) => {
 
 
 // Stripe webhook route
-router.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
