@@ -41,7 +41,7 @@ app.use(cors({
 }));
 
 // Raw body parser for Stripe webhooks must come before express.json
-app.use('/api/payments', webhookRouter);
+app.use('/api/payments/webhook', webhookRouter); // must match Stripe
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' }));

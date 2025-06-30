@@ -105,7 +105,7 @@ router.post('/create-checkout-session', async (req, res) => {
 
 
 // Stripe webhook route
-webhookRouter.post('/webhook',  bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
