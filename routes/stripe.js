@@ -121,7 +121,7 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const customerId = session.customer; // this is Stripe's ID, like "cus_XXXX"
+    const customerId = session.customer; // Stripe ID, e.g., "cus_XXXX"
     const mode = session.mode;
     const userId = session.metadata?.user_id;
     const customerEmail = session.customer_email || session.customer_details?.email;
@@ -130,14 +130,16 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
       let updated = 0;
 
       if (mode === 'subscription') {
-        if (customerEmail) {
-          updated = await knex('users')
-            .whereRaw('LOWER(email) = ?', customerEmail.toLowerCase())
-            .update({ is_pro: true, trial_ends_at: null });
-        } else if (userId) {
+        const updateFields = { is_pro: true, trial_ends_at: null, stripe_customer_id: customerId };
+
+        if (userId) {
           updated = await knex('users')
             .where({ id: userId })
-            .update({ is_pro: true, trial_ends_at: null, stripe_customer_id: customerId  });
+            .update(updateFields);
+        } else if (customerEmail) {
+          updated = await knex('users')
+            .whereRaw('LOWER(email) = ?', customerEmail.toLowerCase())
+            .update(updateFields);
         }
 
         if (updated) {
@@ -183,12 +185,28 @@ router.post('/billing-portal', async (req, res) => {
 
   try {
     const user = await knex('users').where({ id: userId }).first();
-    if (!user?.stripe_customer_id) {
-      return res.status(400).json({ message: 'Missing Stripe customer ID' });
+
+    let customerId = user?.stripe_customer_id;
+
+    if (!customerId) {
+      const search = await stripe.customers.search({
+        query: `email:'${user.email}'`,
+      });
+
+      if (search.data.length > 0) {
+        customerId = search.data[0].id;
+      } else {
+        const customer = await stripe.customers.create({ email: user.email });
+        customerId = customer.id;
+      }
+
+      await knex('users')
+        .where({ id: userId })
+        .update({ stripe_customer_id: customerId });
     }
 
     const session = await stripe.billingPortal.sessions.create({
-      customer: user.stripe_customer_id,
+      customer: customerId,
       return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile`,
     });
 
