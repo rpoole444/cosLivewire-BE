@@ -121,6 +121,7 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+    const customerId = session.customer; // this is Stripe's ID, like "cus_XXXX"
     const mode = session.mode;
     const userId = session.metadata?.user_id;
     const customerEmail = session.customer_email || session.customer_details?.email;
@@ -136,7 +137,7 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
         } else if (userId) {
           updated = await knex('users')
             .where({ id: userId })
-            .update({ is_pro: true, trial_ends_at: null });
+            .update({ is_pro: true, trial_ends_at: null, stripe_customer_id: customerId  });
         }
 
         if (updated) {
@@ -150,9 +151,53 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
     }
   }
 
+  if (event.type === 'customer.subscription.deleted') {
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
+
+    try {
+      const user = await knex('users')
+        .where({ stripe_customer_id: customerId })
+        .first();
+
+      if (user) {
+        await knex('users')
+          .where({ id: user.id })
+          .update({ is_pro: false });
+
+        console.log(`🛑 User ${user.email} subscription canceled`);
+      } else {
+        console.warn(`⚠️ No user found with stripe_customer_id: ${customerId}`);
+      }
+    } catch (err) {
+      console.error('❌ Error handling subscription.deleted:', err.message);
+    }
+  }
+
+
   res.status(200).json({ received: true });
 });
 
+router.post('/billing-portal', async (req, res) => {
+  const { userId } = req.body;
+
+  try {
+    const user = await knex('users').where({ id: userId }).first();
+    if (!user?.stripe_customer_id) {
+      return res.status(400).json({ message: 'Missing Stripe customer ID' });
+    }
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile`,
+    });
+
+    res.status(200).json({ url: session.url });
+  } catch (err) {
+    console.error('❌ Billing portal error:', err.message);
+    res.status(500).json({ message: 'Failed to create billing portal session' });
+  }
+});
 
 module.exports = {
   router,
