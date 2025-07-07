@@ -165,7 +165,10 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
       if (user) {
         await knex('users')
           .where({ id: user.id })
-          .update({ is_pro: false });
+          .update({
+            is_pro: false,
+            pro_cancelled_at: new Date(),
+          });
 
         console.log(`🛑 User ${user.email} subscription canceled`);
       } else {
@@ -173,6 +176,34 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
       }
     } catch (err) {
       console.error('❌ Error handling subscription.deleted:', err.message);
+    }
+  }
+
+  if (event.type === 'customer.subscription.updated') {
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
+
+    const canceled = subscription.cancel_at_period_end || subscription.status === 'canceled';
+
+    if (canceled) {
+      try {
+        const user = await knex('users')
+          .where({ stripe_customer_id: customerId })
+          .first();
+
+        if (user) {
+          await knex('users')
+            .where({ id: user.id })
+            .update({
+              is_pro: false,
+              pro_cancelled_at: new Date(),
+            });
+
+          console.log(`🛑 User ${user.email} subscription marked as canceled (soft cancel)`);
+        }
+      } catch (err) {
+        console.error('❌ Error handling subscription.updated:', err.message);
+      }
     }
   }
 

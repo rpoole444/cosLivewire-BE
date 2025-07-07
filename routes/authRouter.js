@@ -192,7 +192,8 @@ authRouter.get('/session', (req, res) => {
         trial_ends_at: req.user.trial_ends_at,
         displayName: req.user.display_name,
         top_music_genres: req.user.top_music_genres,
-        user_description: req.user.user_description
+        user_description: req.user.user_description,
+        pro_cancelled_at: req.user.pro_cancelled_at
       }
     });
   } else {
@@ -272,6 +273,7 @@ authRouter.post('/login', (req, res, next) => {
             top_music_genres: user.top_music_genres,
             displayName: user.display_name,
             user_description: user.user_description,
+            pro_cancelled_at: user.pro_cancelled_at,
           }
         });
       } catch (updateError) {
