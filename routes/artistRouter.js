@@ -274,8 +274,20 @@ artistRouter.put('/:slug', upload.fields([
       embed_soundcloud: req.body.embed_soundcloud,
       embed_bandcamp: req.body.embed_bandcamp,
       tip_jar_url: req.body.tip_jar_url,
-      genres: Array.isArray(req.body.genres) ? req.body.genres : JSON.parse(req.body.genres),
+      genres: (() => {
+        const raw = req.body.genres;
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === 'string') {
+          try {
+            return JSON.parse(raw);
+          } catch (e) {
+            return raw.split(',').map(g => g.trim());
+          }
+        }
+        return [];
+      })(),
     };
+    
     
     // Optional file updates
     if (req.file) {
