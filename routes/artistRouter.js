@@ -124,21 +124,65 @@ artistRouter.post('/', upload.fields([
 
   const {
     display_name, bio, contact_email, genres, slug: customSlug,
-    embed_youtube, embed_soundcloud, embed_bandcamp,tip_jar_url,
-    website, is_pro
+    embed_youtube, embed_soundcloud, embed_bandcamp, tip_jar_url,
+    website
   } = req.body;
 
   const user_id = req.user?.id;
-  const slug = customSlug ? customSlug.toLowerCase().replace(/\s+/g, '-') : display_name.toLowerCase().replace(/\s+/g, '-');
+  const slug = customSlug
+    ? customSlug.toLowerCase().replace(/\s+/g, '-')
+    : display_name.toLowerCase().replace(/\s+/g, '-');
+
+  const files = req.files;
 
   try {
-    const exists = await Artist.slugExists(slug);
-    if (exists) {
+    // 🔍 1. Check for existing artist by user_id
+    const existingArtist = await knex('artists')
+      .where({ user_id })
+      .first();
+
+    // 🔁 2. Handle soft-deleted artist restoration
+    if (existingArtist && existingArtist.deleted_at) {
+      const [restored] = await knex('artists')
+        .where({ id: existingArtist.id })
+        .update({
+          display_name: display_name.trim(),
+          bio,
+          contact_email,
+          genres: Array.isArray(genres) ? genres : JSON.parse(genres),
+          slug,
+          profile_image: files?.profile_image?.[0]?.location || null,
+          promo_photo: files?.promo_photo?.[0]?.location || null,
+          stage_plot: files?.stage_plot?.[0]?.location || null,
+          press_kit: files?.press_kit?.[0]?.location || null,
+          embed_youtube,
+          embed_soundcloud,
+          embed_bandcamp,
+          tip_jar_url,
+          website,
+          is_pro: true,
+          trial_active: true,
+          trial_start_date: new Date(),
+          deleted_at: null,
+          updated_at: new Date(),
+        })
+        .returning('*');
+
+      return res.status(200).json(restored);
+    }
+
+    // ❌ 3. Block if active artist already exists
+    if (existingArtist) {
+      return res.status(409).json({ message: 'Artist profile already exists' });
+    }
+
+    // 🛡️ 4. Check for slug collision (in case another user already has it)
+    const slugTaken = await Artist.slugExists(slug);
+    if (slugTaken) {
       return res.status(409).json({ message: 'An artist with that slug already exists' });
     }
 
-    const files = req.files;
-
+    // ✅ 5. Create new artist
     const newArtist = await Artist.create({
       user_id,
       display_name: display_name.trim(),
@@ -155,21 +199,21 @@ artistRouter.post('/', upload.fields([
       embed_bandcamp,
       tip_jar_url,
       website,
-      is_pro: true, // Always start as pro during trial
+      is_pro: true,
       trial_active: true,
       trial_start_date: new Date()
     });
-    
-const existingUser = await knex('users').where({ id: user_id }).first();
 
-if (!existingUser.trial_ends_at) {
-  const trialEndsAt = new Date();
-  trialEndsAt.setDate(trialEndsAt.getDate() + 30); // 30-day trial
+    // 🎁 6. Set trial end date if not already set
+    const existingUser = await knex('users').where({ id: user_id }).first();
+    if (!existingUser.trial_ends_at) {
+      const trialEndsAt = new Date();
+      trialEndsAt.setDate(trialEndsAt.getDate() + 30);
+      await knex('users')
+        .where({ id: user_id })
+        .update({ trial_ends_at: trialEndsAt });
+    }
 
-  await knex('users')
-    .where({ id: user_id })
-    .update({ trial_ends_at: trialEndsAt });
-}
     res.status(201).json(newArtist);
   } catch (err) {
     if (err.code === '23505') {
