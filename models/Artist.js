@@ -56,9 +56,10 @@ const Artist = {
   findByUserId: async (user_id) => {
     return knex('artists')
       .where({ user_id })
-      .andWhere('deleted_at', null)
+      .andWhereNull('deleted_at') // ✅ This correctly generates "deleted_at IS NULL"
       .first();
   },
+  
 
   create: async (artistData) => {
     const [newArtist] = await knex('artists')
