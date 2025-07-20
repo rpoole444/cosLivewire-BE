@@ -105,7 +105,7 @@ router.post('/create-checkout-session', async (req, res) => {
 
 
 // Stripe webhook route
-webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -116,51 +116,56 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  console.log('🔔 Stripe Event:', event.type);
-  console.log('🧾 Event Payload:', JSON.stringify(event, null, 2));
+  const eventType = event.type;
+  const data = event.data.object;
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const customerId = session.customer; // Stripe ID, e.g., "cus_XXXX"
-    const mode = session.mode;
-    const userId = session.metadata?.user_id;
-    const customerEmail = session.customer_email || session.customer_details?.email;
+  console.log('🔔 Stripe Event:', eventType);
+
+  // ---------------------
+  // 1️⃣ Subscription Created (checkout.session.completed)
+  // ---------------------
+  if (eventType === 'checkout.session.completed') {
+    const { customer: customerId, mode, metadata, customer_email } = data;
+
+    if (mode !== 'subscription') return res.status(200).send('Not a subscription');
+
+    const userId = metadata?.user_id;
 
     try {
       let updated = 0;
+      const updateFields = {
+        is_pro: true,
+        trial_ends_at: null,
+        stripe_customer_id: customerId,
+        pro_cancelled_at: null,
+      };
 
-      if (mode === 'subscription') {
-        const updateFields = { is_pro: true, trial_ends_at: null, stripe_customer_id: customerId };
+      if (userId) {
+        updated = await knex('users').where({ id: userId }).update(updateFields);
+      } else if (customer_email) {
+        updated = await knex('users')
+          .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
+          .update(updateFields);
+      }
 
-        if (userId) {
-          updated = await knex('users')
-            .where({ id: userId })
-            .update(updateFields);
-        } else if (customerEmail) {
-          updated = await knex('users')
-            .whereRaw('LOWER(email) = ?', customerEmail.toLowerCase())
-            .update(updateFields);
-        }
-
-        if (updated) {
-          console.log(`✅ Updated user ${customerEmail || userId} to is_pro = true`);
-        } else {
-          console.warn(`⚠️ No user found for email ${customerEmail} or id ${userId}`);
-        }
+      if (updated) {
+        console.log(`✅ Updated user ${customer_email || userId} to is_pro = true`);
+      } else {
+        console.warn(`⚠️ No user found for checkout.session.completed`);
       }
     } catch (err) {
       console.error('❌ DB update error:', err.message);
     }
   }
 
-  if (event.type === 'customer.subscription.deleted') {
-    const subscription = event.data.object;
-    const customerId = subscription.customer;
+  // ---------------------
+  // 2️⃣ Subscription Cancelled Immediately
+  // ---------------------
+  if (eventType === 'customer.subscription.deleted') {
+    const { customer: customerId } = data;
 
     try {
-      const user = await knex('users')
-        .where({ stripe_customer_id: customerId })
-        .first();
+      const user = await knex('users').where({ stripe_customer_id: customerId }).first();
 
       if (user) {
         await knex('users')
@@ -170,7 +175,7 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
             pro_cancelled_at: new Date(),
           });
 
-        console.log(`🛑 User ${user.email} subscription canceled`);
+        console.log(`🛑 User ${user.email} subscription canceled immediately`);
       } else {
         console.warn(`⚠️ No user found with stripe_customer_id: ${customerId}`);
       }
@@ -179,56 +184,52 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
     }
   }
 
-  if (event.type === 'customer.subscription.updated') {
-    const subscription = event.data.object;
-    const customerId = subscription.customer;
+  // ---------------------
+  // 3️⃣ Subscription Updated (cancel_at_period_end)
+  // ---------------------
+  if (eventType === 'customer.subscription.updated') {
+    const {
+      customer: customerId,
+      cancel_at_period_end,
+      current_period_end,
+      status,
+    } = data;
 
-    // If the subscription is set to cancel at period end, do NOT immediately revoke Pro status.
-    // Instead, update the user's `pro_cancelled_at` field with the subscription's `current_period_end`,
-    // and leave `is_pro = true` until that date passes.
-    if (subscription.cancel_at_period_end) {
-      try {
-        const user = await knex('users')
-          .where({ stripe_customer_id: customerId })
-          .first();
+    try {
+      const user = await knex('users').where({ stripe_customer_id: customerId }).first();
 
-        if (user) {
-          await knex('users')
-            .where({ id: user.id })
-            .update({
-              pro_cancelled_at: new Date(subscription.current_period_end * 1000),
-            });
-
-          console.log(`⏰ User ${user.email} subscription scheduled to cancel at period end`);
-        }
-      } catch (err) {
-        console.error('❌ Error handling cancel_at_period_end:', err.message);
+      if (!user) {
+        console.warn(`⚠️ No user found with stripe_customer_id: ${customerId}`);
+        return res.status(404).send('User not found');
       }
-    } else if (subscription.status === 'canceled') {
-      try {
-        const user = await knex('users')
-          .where({ stripe_customer_id: customerId })
-          .first();
 
-        if (user) {
-          await knex('users')
-            .where({ id: user.id })
-            .update({
-              is_pro: false,
-              pro_cancelled_at: new Date(),
-            });
+      if (cancel_at_period_end) {
+        const cancelDate = new Date(current_period_end * 1000); // convert Unix timestamp
+        await knex('users')
+          .where({ id: user.id })
+          .update({ pro_cancelled_at: cancelDate });
 
-          console.log(`🛑 User ${user.email} subscription marked as canceled (soft cancel)`);
-        }
-      } catch (err) {
-        console.error('❌ Error handling subscription.updated:', err.message);
+        console.log(`⏰ Scheduled cancel for ${user.email} at ${cancelDate.toISOString()}`);
+      } else if (status === 'canceled') {
+        // Safety catch: ensure fallback if `subscription.deleted` wasn’t received
+        await knex('users')
+          .where({ id: user.id })
+          .update({
+            is_pro: false,
+            pro_cancelled_at: new Date(),
+          });
+
+        console.log(`🛑 User ${user.email} marked as canceled in updated event`);
       }
+    } catch (err) {
+      console.error('❌ Error handling subscription.updated:', err.message);
     }
   }
 
-
+  // ✅ Respond to Stripe
   res.status(200).json({ received: true });
 });
+
 
 router.post('/billing-portal', async (req, res) => {
   const { userId } = req.body;
