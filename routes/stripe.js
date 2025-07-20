@@ -126,30 +126,43 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
   // ---------------------
   if (eventType === 'checkout.session.completed') {
     const { customer: customerId, mode, metadata, customer_email } = data;
-
+  
     if (mode !== 'subscription') return res.status(200).send('Not a subscription');
-
+  
     const userId = metadata?.user_id;
-
+  
     try {
-      let updated = 0;
+      let user;
       const updateFields = {
         is_pro: true,
         trial_ends_at: null,
         stripe_customer_id: customerId,
         pro_cancelled_at: null,
       };
-
+  
       if (userId) {
-        updated = await knex('users').where({ id: userId }).update(updateFields);
+        await knex('users').where({ id: userId }).update(updateFields);
+        user = await knex('users').where({ id: userId }).first();
       } else if (customer_email) {
-        updated = await knex('users')
+        await knex('users')
           .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
           .update(updateFields);
+        user = await knex('users')
+          .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
+          .first();
       }
-
-      if (updated) {
-        console.log(`✅ Updated user ${customer_email || userId} to is_pro = true`);
+  
+      if (user) {
+        await knex('artists')
+          .where({ user_id: user.id })
+          .update({
+            is_pro: true,
+            trial_active: false,
+            pro_cancelled_at: null,
+            updated_at: new Date(),
+          });
+  
+        console.log(`🎨 Updated artist profile for user ${user.email || user.id}`);
       } else {
         console.warn(`⚠️ No user found for checkout.session.completed`);
       }
@@ -157,6 +170,7 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
       console.error('❌ DB update error:', err.message);
     }
   }
+  
 
   // ---------------------
   // 2️⃣ Subscription Cancelled Immediately
