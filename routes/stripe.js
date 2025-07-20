@@ -183,9 +183,28 @@ webhookRouter.post('/',  bodyParser.raw({ type: 'application/json' }), async (re
     const subscription = event.data.object;
     const customerId = subscription.customer;
 
-    const canceled = subscription.cancel_at_period_end || subscription.status === 'canceled';
+    // If the subscription is set to cancel at period end, do NOT immediately revoke Pro status.
+    // Instead, update the user's `pro_cancelled_at` field with the subscription's `current_period_end`,
+    // and leave `is_pro = true` until that date passes.
+    if (subscription.cancel_at_period_end) {
+      try {
+        const user = await knex('users')
+          .where({ stripe_customer_id: customerId })
+          .first();
 
-    if (canceled) {
+        if (user) {
+          await knex('users')
+            .where({ id: user.id })
+            .update({
+              pro_cancelled_at: new Date(subscription.current_period_end * 1000),
+            });
+
+          console.log(`⏰ User ${user.email} subscription scheduled to cancel at period end`);
+        }
+      } catch (err) {
+        console.error('❌ Error handling cancel_at_period_end:', err.message);
+      }
+    } else if (subscription.status === 'canceled') {
       try {
         const user = await knex('users')
           .where({ stripe_customer_id: customerId })
