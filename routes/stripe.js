@@ -130,7 +130,11 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
     if (mode !== 'subscription') return res.status(200).send('Not a subscription');
   
     const userId = metadata?.user_id;
-  
+    if (!userId && !customer_email) {
+      console.warn(`⚠️ No userId or customer_email in metadata`);
+      return res.status(400).send('Missing user identification');
+    }
+    
     try {
       let user;
       const updateFields = {
@@ -158,7 +162,6 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
           .update({
             is_pro: true,
             trial_active: false,
-            pro_cancelled_at: null,
             updated_at: new Date(),
           });
   
