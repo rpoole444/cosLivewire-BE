@@ -98,6 +98,16 @@ artistRouter.get('/:slug', async (req, res) => {
     const artist = await Artist.findBySlugWithEvents(req.params.slug);
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
 
+    // Fetch trial info from user table
+    const user = await knex('users')
+      .select('is_pro', 'trial_ends_at')
+      .where({ id: artist.user_id })
+      .first();
+
+    if (!user) {
+      return res.status(500).json({ message: 'User associated with artist not found' });
+    }
+
     // Only show unapproved profiles to owners or admins
     const isOwnerOrAdmin =
       req.isAuthenticated?.() &&
@@ -106,12 +116,19 @@ artistRouter.get('/:slug', async (req, res) => {
       return res.status(403).json({ message: 'Artist pending approval' });
     }
 
-    res.json(artist);
+    const enrichedArtist = {
+      ...artist,
+      is_pro: user.is_pro,
+      trial_ends_at: user.trial_ends_at
+    };
+
+    res.json(enrichedArtist);
   } catch (err) {
     console.error('Error fetching artist:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // POST create artist profile
 artistRouter.post('/', upload.fields([
