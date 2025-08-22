@@ -14,6 +14,7 @@ const isInTrial = require('../utils/isInTrial');
 const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
+const { recalcListingForUser } = require('../utils/access');
 
 const s3 = new S3Client({
   credentials: fromEnv(),
@@ -170,6 +171,7 @@ artistRouter.post('/trial/start', ensureAuth, async (req, res) => {
       trial_active: true,
       updated_at: new Date(),
     });
+    await recalcListingForUser(userId);
 
     res.json({ ok: true, trial_ends_at: endsAt.toISOString() });
   } catch (e) {
@@ -480,17 +482,28 @@ artistRouter.put('/:id/restore', async (req, res) => {
   }
 });
 
+// PUT /api/artists/:id/approve
 artistRouter.put('/:id/approve', async (req, res) => {
   if (!req.isAuthenticated?.() || !req.user?.is_admin) {
     return res.status(403).json({ message: 'Forbidden' });
   }
-
   const { id } = req.params;
 
   try {
+    const artist = await knex('artists').where({ id }).first();
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    // compute access
+    const { hasProAccess } = require('../utils/access');
+    const access = await hasProAccess(artist.user_id);
+
     const [updated] = await knex('artists')
       .where({ id })
-      .update({ is_approved: true })
+      .update({
+        is_approved: true,
+        is_listed: access,              // ← auto-list if Pro or trial
+        updated_at: new Date(),
+      })
       .returning('*');
 
     res.json(updated);
@@ -500,19 +513,97 @@ artistRouter.put('/:id/approve', async (req, res) => {
   }
 });
 
-artistRouter.put('/:id/decline', isAdmin, async (req, res) => {
+// PUT /api/artists/:id/decline
+artistRouter.put('/:id/decline', async (req, res) => {
+  if (!req.isAuthenticated?.() || !req.user?.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
   const { id } = req.params;
 
   try {
     const [updated] = await knex('artists')
       .where({ id })
-      .update({ is_approved: false })
+      .update({
+        is_approved: false,
+        is_listed: false,               // ← unlist when declined
+        updated_at: new Date(),
+      })
       .returning('*');
 
     res.json(updated);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to decline artist.' });
+  }
+});
+
+
+// Admin-only toggle for listing status (explicit control)
+artistRouter.put('/:id/listing', isAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { is_listed } = req.body;
+
+  try {
+    const [updated] = await knex('artists')
+      .where({ id })
+      .update({ is_listed: !!is_listed, updated_at: new Date() })
+      .returning('*');
+
+    if (!updated) return res.status(404).json({ message: 'Artist not found' });
+    res.json(updated);
+  } catch (err) {
+    console.error('Admin listing toggle error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT /api/artists/:id/publish
+artistRouter.put('/:id/publish', ensureAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const artist = await knex('artists').where({ id }).first();
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+    if (artist.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const { hasProAccess } = require('../utils/access');
+    const access = await hasProAccess(artist.user_id);
+    if (!access) return res.status(402).json({ message: 'Payment required' });
+
+    const [updated] = await knex('artists')
+      .where({ id })
+      .update({ is_listed: true, updated_at: new Date() })
+      .returning('*');
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Publish error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+// Owner/Admin: unpublish (sets is_listed = false)
+artistRouter.put('/:id/unpublish', ensureAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const artist = await knex('artists').where({ id }).first();
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    const isOwner = artist.user_id === req.user?.id;
+    const canAdmin = !!req.user?.is_admin;
+    if (!isOwner && !canAdmin) return res.status(403).json({ message: 'Forbidden' });
+
+    const [updated] = await knex('artists')
+      .where({ id })
+      .update({ is_listed: false, updated_at: new Date() })
+      .returning('*');
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Unpublish error:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

@@ -4,6 +4,7 @@ const router = express.Router();
 const knex = require('../db/knex');
 const webhookRouter = express.Router(); // << separate router
 const bodyParser = require('body-parser');
+const { recalcListingForUser } = require('../utils/access'); // <- add this
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -171,6 +172,7 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
             trial_active: false,
             updated_at: new Date(),
           });
+      await recalcListingForUser(user.id);
 
         console.log(`✅ Created subscription for ${user.email || user.id}`);
       } else {
@@ -195,6 +197,8 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         is_pro: false,
         pro_cancelled_at: new Date(),
       });
+
+      await recalcListingForUser(user.id);
 
       console.log(`🛑 Subscription deleted: ${user.email}`);
     } catch (err) {
@@ -235,6 +239,8 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
             is_pro: false,
             pro_cancelled_at: new Date(),
           });
+
+        await recalcListingForUser(user.id);
 
         console.log(`🚫 Marked user as canceled in updated event: ${user.email}`);
       }
