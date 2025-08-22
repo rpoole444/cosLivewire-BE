@@ -23,7 +23,7 @@ const Artist = {
     return knex('artists')
       .select('display_name', 'slug', 'profile_image', 'genres', 'bio')
       .whereNull('deleted_at')
-      .andWhere({ is_approved: true })
+      .andWhere({ is_approved: true, is_listed: true  })
       .orderBy('display_name');
   },
 
@@ -64,6 +64,7 @@ const Artist = {
     const [newArtist] = await knex('artists')
       .insert({
         is_approved: false,
+        is_listed: false, 
         ...artistData
       })
       .returning('*');
