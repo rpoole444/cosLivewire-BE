@@ -9,6 +9,7 @@ const { S3Client, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/cl
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
+const { ensureAuth } = require('../middleware/auth')
 const isInTrial = require('../utils/isInTrial');
 const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
@@ -379,8 +380,16 @@ artistRouter.put('/by-user/:userId/restore', async (req, res) => {
 
 // GET /api/artists/mine
 artistRouter.get('/mine', ensureAuth, async (req, res) => {
-  const artist = await knex('artists').where({ user_id: req.user.id }).first();
-  res.json({ artist: artist || null });
+  try {
+    const userId = req.user?.id || req.session?.passport?.user;
+    if (!userId) return res.status(401).json({ artist: null });
+
+    const artist = await knex('artists').where({ user_id: userId }).first();
+    return res.json({ artist: artist || null });
+  } catch (e) {
+    console.error('GET /api/artists/mine error:', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
 
