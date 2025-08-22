@@ -377,6 +377,13 @@ artistRouter.put('/by-user/:userId/restore', async (req, res) => {
   }
 });
 
+// GET /api/artists/mine
+artistRouter.get('/mine', ensureAuth, async (req, res) => {
+  const artist = await knex('artists').where({ user_id: req.user.id }).first();
+  res.json({ artist: artist || null });
+});
+
+
 // PUT /api/artists/:id/restore — restore soft-deleted artist profile
 artistRouter.put('/:id/restore', async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
