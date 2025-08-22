@@ -505,6 +505,7 @@ artistRouter.put('/:id/approve', async (req, res) => {
         updated_at: new Date(),
       })
       .returning('*');
+    await recalcListingForUser(updated.user_id);
 
     res.json(updated);
   } catch (err) {
@@ -529,6 +530,7 @@ artistRouter.put('/:id/decline', async (req, res) => {
         updated_at: new Date(),
       })
       .returning('*');
+    await recalcListingForUser(updated.user_id);
 
     res.json(updated);
   } catch (err) {
