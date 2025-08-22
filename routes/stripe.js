@@ -75,6 +75,11 @@ router.post('/create-checkout-session', async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+    // if you also track trial flags, include them here
+if (user.is_pro || user.trial_ends_at && user.trial_ends_at > new Date()) {
+  return res.status(409).json({ message: 'Already Pro. No checkout needed.' });
+}
+
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
