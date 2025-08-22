@@ -9,7 +9,7 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // 🟣 Tip session
 router.post('/create-tip-session', async (req, res) => {
-  const { email, mode, amount } = req.body;
+  const { email, mode, amount, plan} = req.body;
 
   if (!email || !mode || !amount) {
     return res.status(400).json({ message: 'Missing required info: email, mode, amount' });
@@ -37,8 +37,12 @@ router.post('/create-tip-session', async (req, res) => {
         },
       ],
       metadata: {
+        user_id: userId,
+        plan,
         purpose: 'support',
         type: mode,
+        intent: 'publish_artist',
+        artist_id: String(artistId || ''),
       },
       automatic_tax: { enabled: true }, 
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
