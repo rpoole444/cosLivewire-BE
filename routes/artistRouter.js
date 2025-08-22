@@ -53,6 +53,20 @@ artistRouter.get('/pending', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// GET /api/artists/mine
+artistRouter.get('/mine', ensureAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id || req.session?.passport?.user;
+    if (!userId) return res.status(401).json({ artist: null });
+
+    const artist = await knex('artists').where({ user_id: userId }).first();
+    return res.json({ artist: artist || null });
+  } catch (e) {
+    console.error('GET /api/artists/mine error:', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
 // Get signed URL for private media files
 artistRouter.get('/:slug/media/:field', async (req, res) => {
   const { slug, field } = req.params;
@@ -444,20 +458,6 @@ artistRouter.put('/by-user/:userId/restore', async (req, res) => {
   } catch (err) {
     console.error('Restore error:', err);
     res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// GET /api/artists/mine
-artistRouter.get('/mine', ensureAuth, async (req, res) => {
-  try {
-    const userId = req.user?.id || req.session?.passport?.user;
-    if (!userId) return res.status(401).json({ artist: null });
-
-    const artist = await knex('artists').where({ user_id: userId }).first();
-    return res.json({ artist: artist || null });
-  } catch (e) {
-    console.error('GET /api/artists/mine error:', e);
-    return res.status(500).json({ message: 'Server error' });
   }
 });
 
