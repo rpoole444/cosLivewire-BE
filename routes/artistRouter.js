@@ -40,6 +40,8 @@ artistRouter.get('/public-list', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// GET /api/artists/pending
 artistRouter.get('/pending', async (req, res) => {
   try {
     const pendingArtists = await knex('artists')
@@ -107,43 +109,6 @@ artistRouter.get('/:slug/media/:field', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-// PUT /api/artists/:id/publish — publish if user has access; else 402
-artistRouter.put('/:id/publish', ensureAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { id } = req.params;
-
-    const artist = await knex('artists').where({ id }).first();
-    if (!artist || artist.user_id !== userId) {
-      return res.status(404).json({ message: 'Not found' });
-    }
-
-    const user = await knex('users').where({ id: userId }).first();
-    const now = new Date();
-    const hasTrial = user?.trial_ends_at && new Date(user.trial_ends_at) > now;
-    const hasProAccess = !!user?.is_pro || !!hasTrial;
-
-    if (!hasProAccess) {
-      return res.status(402).json({ message: 'Payment required', code: 'PAYWALL', artist_id: id });
-    }
-
-    const [updated] = await knex('artists')
-      .where({ id })
-      .update({
-        is_listed: true,
-        is_pro: true, // reflects publish access at this moment
-        updated_at: new Date(),
-      })
-      .returning('*');
-
-    res.json({ artist: updated });
-  } catch (e) {
-    console.error('PUT /api/artists/:id/publish error', e);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
 
 // POST /api/artists/trial/start — start (or reuse) a user trial
 artistRouter.post('/trial/start', ensureAuth, async (req, res) => {
