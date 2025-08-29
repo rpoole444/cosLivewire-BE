@@ -209,6 +209,14 @@ artistRouter.post(
 
     const files = req.files;
 
+     // 🔒 Minimal validation → return 400, not 500
+      if (!display_name || !contact_email) {
+        return res.status(400).json({ message: 'Display name and contact email are required.' });
+      }
+      if (!files?.profile_image?.[0]) {
+        return res.status(400).json({ message: 'Please upload a profile image.' });
+      }
+
     try {
       // 1) Existing by user?
       const existingArtist = await knex('artists').where({ user_id }).first();
