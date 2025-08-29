@@ -114,36 +114,41 @@ artistRouter.get('/:slug/media/:field', async (req, res) => {
 artistRouter.post('/trial/start', ensureAuth, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await knex('users').where({ id: userId }).first();
+    const user = await knex('users').first('is_pro', 'trial_ends_at').where({ id: userId });
     const now = new Date();
 
-    if (user?.is_pro) return res.json({ ok: true, reason: 'already_pro' });
+    if (user?.is_pro) {
+      return res.status(200).json({ ok: true, reason: 'already_pro' });
+    }
 
-    const hasActiveTrial = user?.trial_ends_at && new Date(user.trial_ends_at) > now;
+    const hasActiveTrial = !!user?.trial_ends_at && new Date(user.trial_ends_at) > now;
     if (hasActiveTrial) {
-      return res.json({ ok: true, reason: 'trial_active', trial_ends_at: user.trial_ends_at });
+      return res.status(200).json({ ok: true, reason: 'trial_active', trial_ends_at: user.trial_ends_at });
     }
 
     const endsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    await knex('users').where({ id: userId }).update({
-      trial_ends_at: endsAt,
-      updated_at: new Date(),
+    await knex.transaction(async trx => {
+      await trx('users')
+        .where({ id: userId })
+        .update({ trial_ends_at: endsAt, updated_at: new Date() });
+
+      await trx('artists')
+        .where({ user_id: userId })
+        .whereNull('deleted_at')
+        .update({ trial_active: true, updated_at: new Date() });
     });
 
-    // reflect on any existing artist records if you like
-    await knex('artists').where({ user_id: userId }).update({
-      trial_active: true,
-      updated_at: new Date(),
-    });
+    // Recalc after commit so reads see committed state
     await recalcListingForUser(userId);
 
-    res.json({ ok: true, trial_ends_at: endsAt.toISOString() });
+    return res.status(200).json({ ok: true, trial_ends_at: endsAt.toISOString() });
   } catch (e) {
     console.error('POST /api/artists/trial/start error', e);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {
