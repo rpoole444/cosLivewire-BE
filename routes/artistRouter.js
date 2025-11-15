@@ -61,16 +61,35 @@ artistRouter.get('/pending', async (req, res) => {
 artistRouter.get('/mine', ensureAuth, async (req, res) => {
   try {
     const userId = req.user?.id || req.session?.passport?.user;
-    if (!userId) return res.status(401).json({ artist: null });
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
 
-    const artist = await knex('artists')
-    .where({ user_id: userId }).whereNull('delete_at').first();
-    return res.json({ artist: artist || null });
+    const activeArtist = await knex('artists')
+      .where({ user_id: userId })
+      .whereNull('deleted_at')
+      .first();
+
+    const deletedArtist = await knex('artists')
+      .where({ user_id: userId })
+      .whereNotNull('deleted_at')
+      .orderBy('deleted_at', 'desc')
+      .first();
+
+    const hasActiveArtist = !!activeArtist;
+    const canRestore = !hasActiveArtist && !!deletedArtist;
+
+    return res.json({
+      artist: activeArtist || null,
+      deletedArtist: deletedArtist || null,
+      canRestore,
+    });
   } catch (e) {
     console.error('GET /api/artists/mine error:', e);
     return res.status(500).json({ message: 'Server error' });
   }
 });
+
 // Get signed URL for private media files
 artistRouter.get('/:slug/media/:field', async (req, res) => {
   const { slug, field } = req.params;
