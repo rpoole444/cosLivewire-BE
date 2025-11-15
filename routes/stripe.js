@@ -68,7 +68,6 @@ router.post('/create-checkout-session', async (req, res) => {
 
   const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
   const annualPriceId = process.env.STRIPE_ANNUAL_PRICE_ID;
-
   const priceId = plan === 'annual' ? annualPriceId : monthlyPriceId;
 
   if (!priceId) {
@@ -80,27 +79,17 @@ router.post('/create-checkout-session', async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    // if you also track trial flags, include them here
-if (user.is_pro || user.trial_ends_at && user.trial_ends_at > new Date()) {
-  return res.status(409).json({ message: 'Already Pro. No checkout needed.' });
-}
-
+    if (user.is_pro) {
+      return res.status(409).json({ message: 'Already Pro. No checkout needed.' });
+    }
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
       customer_email: user.email,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      metadata: {
-        user_id: userId,
-        plan,
-      },
-      automatic_tax: { enabled: true }, 
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: { user_id: userId, plan },
+      automatic_tax: { enabled: true },
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?canceled=true`,
     });
@@ -111,6 +100,7 @@ if (user.is_pro || user.trial_ends_at && user.trial_ends_at > new Date()) {
     return res.status(500).json({ message: 'Failed to create checkout session' });
   }
 });
+
 
 // Stripe webhook route
 webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
