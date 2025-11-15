@@ -63,7 +63,8 @@ artistRouter.get('/mine', ensureAuth, async (req, res) => {
     const userId = req.user?.id || req.session?.passport?.user;
     if (!userId) return res.status(401).json({ artist: null });
 
-    const artist = await knex('artists').where({ user_id: userId }).first();
+    const artist = await knex('artists')
+    .where({ user_id: userId }).whereNull('delete_at').first();
     return res.json({ artist: artist || null });
   } catch (e) {
     console.error('GET /api/artists/mine error:', e);
@@ -406,10 +407,16 @@ artistRouter.delete('/:slug', async (req, res) => {
   }
 
   try {
+    const timestamp = new Date();
     await knex('artists')
       .where({ slug })
-      .update({ deleted_at: new Date() });
-
+      .update({ 
+        deleted_at: timestamp ,
+        is_listed: false,
+        is_approved: false,
+        updated_at: timestamp
+      });
+      recalcListingForUser(artist.user_id)
     res.status(200).json({ message: 'Artist soft-deleted' });
   } catch (err) {
     console.error('Soft delete error:', err);
@@ -420,19 +427,25 @@ artistRouter.put('/by-user/:userId/restore', async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
 
   const { userId } = req.params;
-
+const isOwner = Number(userId) === req.user?.id;
+    if (!isOwner && !req.user?.is_admin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
   try {
     const artist = await knex('artists')
       .where({ user_id: userId })
-      .andWhere('deleted_at', 'is not', null)
+      .whereNotNull('deleted_at')
       .first();
 
     if (!artist) return res.status(404).json({ message: 'No deleted artist profile found for user.' });
 
+    const timestamp = new Date();
     const [restored] = await knex('artists')
       .where({ id: artist.id })
-      .update({ deleted_at: null })
+      .update({ deleted_at: null, updated_at: timestamp })
       .returning('*');
+
+   await recalcListingForUser(restored.user_id);
 
     res.json(restored);
   } catch (err) {
@@ -449,10 +462,18 @@ artistRouter.put('/:id/restore', async (req, res) => {
   const { id } = req.params;
 
   try {
+ const artist = await knex('artists').where({ id }).first(); 
+  if (!artist) return res.status(404).json({ message: 'Artist not found' });
+    const isOwner = artist.user_id === req.user?.id;
+    if (!isOwner && !req.user?.is_admin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     const restored = await Artist.restore(id);
     if (!restored) {
       return res.status(404).json({ message: 'Artist not found' });
     }
+    await recalcListingForUser(restored.user_id);
     res.json(restored);
   } catch (err) {
     console.error('Restore artist error:', err);
