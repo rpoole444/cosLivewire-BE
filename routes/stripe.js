@@ -211,6 +211,10 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
       status,
     } = subscription;
 
+    console.log(
+      `🧪 [stripe.subscription.updated] event=${eventType} subscription=${subscription.id} customer=${customerId} cancel_at_period_end=${cancel_at_period_end} current_period_end=${current_period_end} status=${status}`
+    );
+
     try {
       const user = await knex('users').where({ stripe_customer_id: customerId }).first();
       if (!user) {
@@ -218,21 +222,28 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         return;
       }
 
-      console.log(`🌀 Sub updated for ${user.email}: cancel_at_period_end=${cancel_at_period_end}, status=${status}`);
+      console.log(
+        `🧪 [stripe.subscription.updated] user id=${user.id} email=${user.email} is_pro=${user.is_pro} pro_cancelled_at=${user.pro_cancelled_at}`
+      );
 
       if (cancel_at_period_end) {
         const cancelDate = new Date(current_period_end * 1000);
+        console.log(
+          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${cancelDate.toISOString()} is_pro=${user.is_pro}`
+        );
         await knex('users').where({ id: user.id }).update({ pro_cancelled_at: cancelDate });
         await recalcListingForUser(user.id);
         console.log(`⏰ Scheduled cancellation for ${user.email} at ${cancelDate.toISOString()}`);
       } else if (status === 'canceled') {
+        const newValues = {
+          is_pro: false,
+          pro_cancelled_at: new Date(),
+        };
+        console.log(
+          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${newValues.pro_cancelled_at.toISOString()} is_pro=${newValues.is_pro}`
+        );
         // Fallback safety in case Stripe skips subscription.deleted
-        await knex('users')
-          .where({ id: user.id })
-          .update({
-            is_pro: false,
-            pro_cancelled_at: new Date(),
-          });
+        await knex('users').where({ id: user.id }).update(newValues);
 
         await recalcListingForUser(user.id);
 
