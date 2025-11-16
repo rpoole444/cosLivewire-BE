@@ -5,18 +5,9 @@ const knex = require('../db/knex');
 const webhookRouter = express.Router(); // << separate router
 const bodyParser = require('body-parser');
 const { recalcListingForUser } = require('../utils/access'); // <- add this
+const { computeProActive } = require('../utils/proState');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-
-function computeProActive(user) {
-  const isPro = !!user?.is_pro;
-  const cancelAt = user?.pro_cancelled_at ? new Date(user.pro_cancelled_at) : null;
-  const now = new Date();
-
-  if (!isPro) return false;
-  if (!cancelAt) return true;
-  return cancelAt > now;
-}
 
 // 🟣 Tip session
 router.post('/create-tip-session', async (req, res) => {
@@ -172,7 +163,8 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
             trial_active: false,
             updated_at: new Date(),
           });
-      await recalcListingForUser(user.id);
+
+        await recalcListingForUser(user.id);
 
         console.log(`✅ Created subscription for ${user.email || user.id}`);
       } else {
@@ -200,6 +192,13 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         is_pro: false,
         pro_cancelled_at: new Date(),
       });
+
+      await knex('artists')
+        .where({ user_id: user.id })
+        .update({
+          is_pro: false,
+          updated_at: new Date(),
+        });
 
       await recalcListingForUser(user.id);
 
@@ -250,12 +249,24 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         await recalcListingForUser(user.id);
         console.log(`⏰ Scheduled cancellation for ${user.email} at ${cancelDate.toISOString()}`);
         userUpdated = true;
+      } else if (cancel_at_period_end && !rawCurrentPeriodEnd) {
+        console.warn(
+          `⚠️ [stripe.subscription.updated] Missing current_period_end for ${user.email}, skipping schedule`
+        );
       } else if (!cancel_at_period_end && status === 'active') {
         await knex('users')
           .where({ id: user.id })
           .update({
             is_pro: true,
             pro_cancelled_at: null,
+          });
+
+        await knex('artists')
+          .where({ user_id: user.id })
+          .update({
+            is_pro: true,
+            trial_active: false,
+            updated_at: new Date(),
           });
 
         await recalcListingForUser(user.id);
@@ -267,6 +278,13 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
           .update({
             is_pro: false,
             pro_cancelled_at: new Date(),
+          });
+
+        await knex('artists')
+          .where({ user_id: user.id })
+          .update({
+            is_pro: false,
+            updated_at: new Date(),
           });
 
         await recalcListingForUser(user.id);

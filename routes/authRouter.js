@@ -9,6 +9,7 @@ const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
 const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
+const { computeProActive } = require('../utils/proState');
 
 const authRouter = express.Router();
 
@@ -178,37 +179,51 @@ authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
   }
 });
 
-function computeProActive(user) {
-  const isPro = !!user?.is_pro;
-  const cancelAt = user?.pro_cancelled_at ? new Date(user.pro_cancelled_at) : null;
-  const now = new Date();
-
-  if (!isPro) return false;
-  if (!cancelAt) return true;
-  return cancelAt > now;
-}
-
 // Checks if user is already logged in
-authRouter.get('/session', (req, res) => {
-  if (req.isAuthenticated?.() && req.user) {
-    return res.json({ 
-      isLoggedIn: true, 
-      user: {
-        id: req.user.id,
-        email: req.user.email,
-        is_admin: req.user.is_admin,
-        is_pro: req.user.is_pro,
-        trial_active: isInTrial(req.user.trial_ends_at),
-        trial_ends_at: req.user.trial_ends_at,
-        displayName: req.user.display_name,
-        top_music_genres: req.user.top_music_genres,
-        user_description: req.user.user_description,
-        pro_cancelled_at: req.user.pro_cancelled_at,
-        pro_active: computeProActive(req.user)
-      }
-    });
-  } else {
+authRouter.get('/session', async (req, res) => {
+  if (!(req.isAuthenticated?.() && req.user)) {
     return res.json({ isLoggedIn: false, user: null });
+  }
+
+  try {
+    const dbUser = await findUserById(req.user.id);
+    if (!dbUser) {
+      return res.json({ isLoggedIn: false, user: null });
+    }
+
+    const pro_active = computeProActive(dbUser);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        '[auth.session] user=',
+        dbUser.email,
+        'is_pro=',
+        dbUser.is_pro,
+        'pro_cancelled_at=',
+        dbUser.pro_cancelled_at,
+        'pro_active=',
+        pro_active
+      );
+    }
+
+    return res.json({
+      isLoggedIn: true,
+      user: {
+        id: dbUser.id,
+        email: dbUser.email,
+        is_admin: dbUser.is_admin,
+        is_pro: !!dbUser.is_pro,
+        trial_active: isInTrial(dbUser.trial_ends_at),
+        trial_ends_at: dbUser.trial_ends_at,
+        displayName: dbUser.display_name,
+        top_music_genres: dbUser.top_music_genres,
+        user_description: dbUser.user_description,
+        pro_cancelled_at: dbUser.pro_cancelled_at,
+        pro_active,
+      },
+    });
+  } catch (err) {
+    console.error('[auth.session] error fetching session user', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
