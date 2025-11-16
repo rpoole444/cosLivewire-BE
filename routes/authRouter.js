@@ -178,6 +178,16 @@ authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
   }
 });
 
+function computeProActive(user) {
+  const isPro = !!user?.is_pro;
+  const cancelAt = user?.pro_cancelled_at ? new Date(user.pro_cancelled_at) : null;
+  const now = new Date();
+
+  if (!isPro) return false;
+  if (!cancelAt) return true;
+  return cancelAt > now;
+}
+
 // Checks if user is already logged in
 authRouter.get('/session', (req, res) => {
   if (req.isAuthenticated?.() && req.user) {
@@ -193,7 +203,8 @@ authRouter.get('/session', (req, res) => {
         displayName: req.user.display_name,
         top_music_genres: req.user.top_music_genres,
         user_description: req.user.user_description,
-        pro_cancelled_at: req.user.pro_cancelled_at
+        pro_cancelled_at: req.user.pro_cancelled_at,
+        pro_active: computeProActive(req.user)
       }
     });
   } else {

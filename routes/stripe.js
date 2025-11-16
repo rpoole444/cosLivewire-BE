@@ -261,6 +261,17 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         await recalcListingForUser(user.id);
 
         console.log(`🚫 Marked user as canceled in updated event: ${user.email}`);
+      } else if (!cancel_at_period_end && status === 'active') {
+        const newValues = {
+          is_pro: true,
+          pro_cancelled_at: null,
+        };
+        console.log(
+          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${newValues.pro_cancelled_at} is_pro=${newValues.is_pro}`
+        );
+        await knex('users').where({ id: user.id }).update(newValues);
+        await recalcListingForUser(user.id);
+        console.log(`✅ Renewal detected, cleared cancellation for ${user.email}`);
       }
     } catch (err) {
       console.error('❌ Error in subscription.updated handler:', err.message);
