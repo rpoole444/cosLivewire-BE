@@ -193,16 +193,12 @@ authRouter.get('/session', async (req, res) => {
 
     const pro_active = computeProActive(dbUser);
     if (process.env.NODE_ENV !== 'production') {
-      console.log(
-        '[auth.session] user=',
-        dbUser.email,
-        'is_pro=',
-        dbUser.is_pro,
-        'pro_cancelled_at=',
-        dbUser.pro_cancelled_at,
-        'pro_active=',
-        pro_active
-      );
+      console.log('[auth.session]', dbUser.email, {
+        is_pro: dbUser.is_pro,
+        trial_ends_at: dbUser.trial_ends_at,
+        pro_cancelled_at: dbUser.pro_cancelled_at,
+        pro_active,
+      });
     }
 
     return res.json({
@@ -218,6 +214,7 @@ authRouter.get('/session', async (req, res) => {
         top_music_genres: dbUser.top_music_genres,
         user_description: dbUser.user_description,
         pro_cancelled_at: dbUser.pro_cancelled_at,
+        stripe_customer_id: dbUser.stripe_customer_id,
         pro_active,
       },
     });

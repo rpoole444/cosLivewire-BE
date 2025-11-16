@@ -223,10 +223,6 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
       subscription.items?.data?.[0]?.current_period_end ??
       null;
 
-    console.log(
-      `🧪 [stripe.subscription.updated] event=${eventType} subscription=${subscription.id} customer=${customerId} cancel_at_period_end=${cancel_at_period_end} current_period_end=${rawCurrentPeriodEnd} status=${status}`
-    );
-
     try {
       const user = await knex('users').where({ stripe_customer_id: customerId }).first();
       if (!user) {
@@ -234,9 +230,19 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         return;
       }
 
-      console.log(
-        `🧪 [stripe.subscription.updated] user id=${user.id} email=${user.email} is_pro=${user.is_pro} pro_cancelled_at=${user.pro_cancelled_at}`
-      );
+      console.log('[stripe.subscription.updated]', {
+        event: eventType,
+        subscription: subscription.id,
+        customer: customerId,
+        cancel_at_period_end,
+        current_period_end: rawCurrentPeriodEnd,
+        status,
+      });
+
+      console.log('[stripe.updated.before]', user.email, {
+        is_pro: user.is_pro,
+        pro_cancelled_at: user.pro_cancelled_at,
+      });
 
       let userUpdated = false;
 
@@ -295,23 +301,18 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
       if (userUpdated) {
         const freshUser = await knex('users').where({ id: user.id }).first();
         const pro_active = computeProActive(freshUser);
-        console.log(
-          '[stripe.subscription.updated] user=',
-          freshUser.email,
-          'is_pro=',
-          freshUser.is_pro,
-          'pro_cancelled_at=',
-          freshUser.pro_cancelled_at,
-          'pro_active=',
-          pro_active
-        );
+        console.log('[stripe.updated.after]', freshUser.email, {
+          is_pro: freshUser.is_pro,
+          pro_cancelled_at: freshUser.pro_cancelled_at,
+          pro_active,
+        });
       }
     } catch (err) {
       console.error('❌ Error in subscription.updated handler:', err.message);
     }
   }
 
-  res.status(200).json({ received: true });
+  return res.status(200).json({ received: true });
 });
 
 
