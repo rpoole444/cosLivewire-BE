@@ -8,6 +8,16 @@ const { recalcListingForUser } = require('../utils/access'); // <- add this
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
+function computeProActive(user) {
+  const isPro = !!user?.is_pro;
+  const cancelAt = user?.pro_cancelled_at ? new Date(user.pro_cancelled_at) : null;
+  const now = new Date();
+
+  if (!isPro) return false;
+  if (!cancelAt) return true;
+  return cancelAt > now;
+}
+
 // 🟣 Tip session
 router.post('/create-tip-session', async (req, res) => {
   const { email, mode, amount, plan} = req.body;
@@ -207,12 +217,15 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
     const {
       customer: customerId,
       cancel_at_period_end,
-      current_period_end,
       status,
     } = subscription;
+    const rawCurrentPeriodEnd =
+      subscription.current_period_end ??
+      subscription.items?.data?.[0]?.current_period_end ??
+      null;
 
     console.log(
-      `🧪 [stripe.subscription.updated] event=${eventType} subscription=${subscription.id} customer=${customerId} cancel_at_period_end=${cancel_at_period_end} current_period_end=${current_period_end} status=${status}`
+      `🧪 [stripe.subscription.updated] event=${eventType} subscription=${subscription.id} customer=${customerId} cancel_at_period_end=${cancel_at_period_end} current_period_end=${rawCurrentPeriodEnd} status=${status}`
     );
 
     try {
@@ -226,52 +239,54 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
         `🧪 [stripe.subscription.updated] user id=${user.id} email=${user.email} is_pro=${user.is_pro} pro_cancelled_at=${user.pro_cancelled_at}`
       );
 
-      if (cancel_at_period_end) {
-        const endTimestamp =
-          current_period_end ??
-          subscription.cancel_at ??
-          subscription.items?.data?.[0]?.current_period_end;
-        console.log(
-          `🧪 [stripe.subscription.updated] cancel_at_period_end endTimestamp=${endTimestamp}`
-        );
-        if (!endTimestamp) {
-          console.warn(
-            `⚠️ [stripe.subscription.updated] Missing end timestamp for user ${user.id}, skipping pro_cancelled_at update`
-          );
-          return;
-        }
-        const cancelDate = new Date(endTimestamp * 1000);
-        console.log(
-          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${cancelDate.toISOString()} is_pro=${user.is_pro}`
-        );
-        await knex('users').where({ id: user.id }).update({ pro_cancelled_at: cancelDate });
+      let userUpdated = false;
+
+      if (cancel_at_period_end && rawCurrentPeriodEnd) {
+        const cancelDate = new Date(rawCurrentPeriodEnd * 1000);
+        await knex('users')
+          .where({ id: user.id })
+          .update({ pro_cancelled_at: cancelDate });
+
         await recalcListingForUser(user.id);
         console.log(`⏰ Scheduled cancellation for ${user.email} at ${cancelDate.toISOString()}`);
-      } else if (status === 'canceled') {
-        const newValues = {
-          is_pro: false,
-          pro_cancelled_at: new Date(),
-        };
-        console.log(
-          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${newValues.pro_cancelled_at.toISOString()} is_pro=${newValues.is_pro}`
-        );
-        // Fallback safety in case Stripe skips subscription.deleted
-        await knex('users').where({ id: user.id }).update(newValues);
-
-        await recalcListingForUser(user.id);
-
-        console.log(`🚫 Marked user as canceled in updated event: ${user.email}`);
+        userUpdated = true;
       } else if (!cancel_at_period_end && status === 'active') {
-        const newValues = {
-          is_pro: true,
-          pro_cancelled_at: null,
-        };
-        console.log(
-          `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${newValues.pro_cancelled_at} is_pro=${newValues.is_pro}`
-        );
-        await knex('users').where({ id: user.id }).update(newValues);
+        await knex('users')
+          .where({ id: user.id })
+          .update({
+            is_pro: true,
+            pro_cancelled_at: null,
+          });
+
         await recalcListingForUser(user.id);
-        console.log(`✅ Renewal detected, cleared cancellation for ${user.email}`);
+        console.log(`✅ Renewed subscription for ${user.email}, cleared pro_cancelled_at`);
+        userUpdated = true;
+      } else if (status === 'canceled') {
+        await knex('users')
+          .where({ id: user.id })
+          .update({
+            is_pro: false,
+            pro_cancelled_at: new Date(),
+          });
+
+        await recalcListingForUser(user.id);
+        console.log(`🚫 Subscription canceled for ${user.email}`);
+        userUpdated = true;
+      }
+
+      if (userUpdated) {
+        const freshUser = await knex('users').where({ id: user.id }).first();
+        const pro_active = computeProActive(freshUser);
+        console.log(
+          '[stripe.subscription.updated] user=',
+          freshUser.email,
+          'is_pro=',
+          freshUser.is_pro,
+          'pro_cancelled_at=',
+          freshUser.pro_cancelled_at,
+          'pro_active=',
+          pro_active
+        );
       }
     } catch (err) {
       console.error('❌ Error in subscription.updated handler:', err.message);
