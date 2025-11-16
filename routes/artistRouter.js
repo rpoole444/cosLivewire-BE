@@ -15,6 +15,7 @@ const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
 const { recalcListingForUser } = require('../utils/access');
+const { computeProActive } = require('../utils/proState');
 
 const s3 = new S3Client({
   credentials: fromEnv(),
@@ -313,6 +314,34 @@ artistRouter.post(
         is_approved: false,
         // keep whatever columns you already have; do NOT flip is_pro/trial here
       });
+
+      try {
+        const user = await knex('users').where({ id: user_id }).first();
+        if (user) {
+          const proActive = computeProActive(user);
+          await knex('artists')
+            .where({ id: newArtist.id })
+            .update({
+              is_pro: proActive,
+              trial_active: !proActive,
+              updated_at: new Date(),
+            });
+          console.log(
+            '[artist-signup] synced artist flags for user=',
+            user.email,
+            'artistId=',
+            newArtist.id,
+            'proActive=',
+            proActive
+          );
+          newArtist.is_pro = proActive;
+          newArtist.trial_active = !proActive;
+        } else {
+          console.warn('[artist-signup] No user found for session id', user_id);
+        }
+      } catch (syncErr) {
+        console.error('[artist-signup] Failed to sync pro state', syncErr);
+      }
 
       return res.status(201).json(newArtist);
     } catch (err) {
