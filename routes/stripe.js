@@ -227,7 +227,20 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
       );
 
       if (cancel_at_period_end) {
-        const cancelDate = new Date(current_period_end * 1000);
+        const endTimestamp =
+          current_period_end ??
+          subscription.cancel_at ??
+          subscription.items?.data?.[0]?.current_period_end;
+        console.log(
+          `🧪 [stripe.subscription.updated] cancel_at_period_end endTimestamp=${endTimestamp}`
+        );
+        if (!endTimestamp) {
+          console.warn(
+            `⚠️ [stripe.subscription.updated] Missing end timestamp for user ${user.id}, skipping pro_cancelled_at update`
+          );
+          return;
+        }
+        const cancelDate = new Date(endTimestamp * 1000);
         console.log(
           `🧪 [stripe.subscription.updated] update user ${user.id} set pro_cancelled_at=${cancelDate.toISOString()} is_pro=${user.is_pro}`
         );
