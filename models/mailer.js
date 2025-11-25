@@ -22,9 +22,42 @@ const inlineImage = (filePath, cid) => ({
 // logo lives in /public — adjust as needed
 const LOGO_PATH = path.join(__dirname, "..", "public", "alpine_groove_guide_icon.png");
 
+const DEFAULT_FRONTEND_BASE_URL = "http://localhost:3001";
+
+const getFrontendBaseUrl = () => {
+  const configuredUrl = (process.env.FRONTEND_BASE_URL || process.env.FRONTEND_URL || "").trim();
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, ""); // normalize in case of accidental trailing slash
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.warn(
+      `FRONTEND_BASE_URL is not set. Falling back to ${DEFAULT_FRONTEND_BASE_URL} for password reset emails.`
+    );
+    return DEFAULT_FRONTEND_BASE_URL;
+  }
+
+  const message =
+    "FRONTEND_BASE_URL is not configured. Unable to send password reset email with a valid link.";
+  console.error(message);
+  throw new Error(message);
+};
+
+const buildPasswordResetUrl = (resetToken) => {
+  if (!resetToken) {
+    throw new Error("Reset token is required to build the password reset URL.");
+  }
+
+  const baseUrl = getFrontendBaseUrl();
+  return `${baseUrl}/reset-password/${resetToken}`;
+};
+
+exports.buildPasswordResetUrl = buildPasswordResetUrl;
+
 // ---------- 1.  password‑reset ----------
 exports.sendPasswordResetEmail = async (email, resetToken) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+  const resetUrl = buildPasswordResetUrl(resetToken);
 
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
