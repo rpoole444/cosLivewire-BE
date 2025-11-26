@@ -1,8 +1,32 @@
 // utils/access.js
 const knex = require('../db/knex');
 
-function trialIsActive(trial_ends_at) {
-  return !!trial_ends_at && new Date(trial_ends_at) > new Date();
+const ACCESS_STATES = {
+  PRO: 'pro',
+  TRIAL: 'trial',
+  GATED: 'gated',
+  NONE: 'none',
+};
+
+function trialIsActive(trial_ends_at, now = new Date()) {
+  return !!trial_ends_at && new Date(trial_ends_at) > now;
+}
+
+function getArtistAccessState(userLike, now = new Date()) {
+  if (!userLike) return ACCESS_STATES.NONE;
+
+  const { is_pro, trial_ends_at, pro_cancelled_at, stripe_customer_id } = userLike;
+  const trialActive = trialIsActive(trial_ends_at, now);
+
+  if (is_pro) return ACCESS_STATES.PRO;
+  if (trialActive) return ACCESS_STATES.TRIAL;
+
+  const hadAccessBefore = !!pro_cancelled_at || !!trial_ends_at || !!stripe_customer_id;
+  if (hadAccessBefore) {
+    return ACCESS_STATES.GATED;
+  }
+
+  return ACCESS_STATES.NONE;
 }
 
 async function hasProAccess(userId) {
@@ -10,8 +34,7 @@ async function hasProAccess(userId) {
     .first('is_pro', 'trial_ends_at')
     .where({ id: userId });
 
-  const now = new Date();
-  const trialActive = !!user?.trial_ends_at && new Date(user.trial_ends_at) > now;
+  const trialActive = trialIsActive(user?.trial_ends_at);
 
   return !!user?.is_pro || trialActive;
 }
@@ -32,7 +55,6 @@ async function recalcListingForUser(userId) {
     !!user.is_pro &&
     (!user.pro_cancelled_at || new Date(user.pro_cancelled_at) > now);
 
-  const access = await hasProAccess(userId);
   const ts = new Date();
 
   const artistUpdates = {
@@ -52,20 +74,16 @@ async function recalcListingForUser(userId) {
     user.email,
     'proActive=',
     proActive,
-    ' -> updated artists.is_pro/trial_active'
+    ' -> synced artist pro flags'
   );
 
-  // Unlist everything first (safe default)
-  await knex('artists')
-    .where({ user_id: userId })
-    .whereNull('deleted_at')
-    .update({ is_listed: false, updated_at: ts });
-
-  // Only list approved artists if the user has access
+  // Auto-list approved artists when access becomes active, but never unlist automatically.
+  const access = await hasProAccess(userId);
   if (access) {
     await knex('artists')
       .where({ user_id: userId, is_approved: true })
       .whereNull('deleted_at')
+      .andWhere({ is_listed: false })
       .update({ is_listed: true, updated_at: ts });
   }
 
@@ -73,4 +91,10 @@ async function recalcListingForUser(userId) {
 }
 
 
-module.exports = { hasProAccess, recalcListingForUser, trialIsActive };
+module.exports = {
+  hasProAccess,
+  recalcListingForUser,
+  trialIsActive,
+  getArtistAccessState,
+  ACCESS_STATES,
+};

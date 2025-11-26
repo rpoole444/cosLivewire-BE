@@ -14,7 +14,7 @@ const isInTrial = require('../utils/isInTrial');
 const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
-const { recalcListingForUser } = require('../utils/access');
+const { recalcListingForUser, getArtistAccessState } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 
 const MAX_EMBED_URL_LENGTH = 2000;
@@ -38,7 +38,28 @@ const upload = multer({
 artistRouter.get('/public-list', async (req, res) => {
   try {
     const artists = await Artist.findAllPublic();
-    res.json(artists);
+    const shaped = artists.map((artist) => {
+      const access_state = getArtistAccessState({
+        is_pro: artist.user_is_pro,
+        trial_ends_at: artist.user_trial_ends_at,
+        pro_cancelled_at: artist.user_pro_cancelled_at,
+        stripe_customer_id: artist.user_stripe_customer_id,
+      });
+
+      return {
+        id: artist.id,
+        display_name: artist.display_name,
+        slug: artist.slug,
+        profile_image: artist.profile_image,
+        genres: artist.genres,
+        bio: artist.bio,
+        is_pro: artist.user_is_pro,
+        trial_ends_at: artist.user_trial_ends_at,
+        pro_cancelled_at: artist.user_pro_cancelled_at,
+        access_state,
+      };
+    });
+    res.json(shaped);
   } catch (err) {
     console.error('Error fetching public artist list:', err);
     res.status(500).json({ message: 'Server error' });
@@ -182,7 +203,7 @@ artistRouter.get('/:slug', async (req, res) => {
 
     // Fetch trial info from user table
     const user = await knex('users')
-      .select('is_pro', 'trial_ends_at')
+      .select('is_pro', 'trial_ends_at', 'pro_cancelled_at', 'stripe_customer_id')
       .where({ id: artist.user_id })
       .first();
 
@@ -191,17 +212,27 @@ artistRouter.get('/:slug', async (req, res) => {
     }
 
     // Only show unapproved profiles to owners or admins
-    const isOwnerOrAdmin =
-      req.isAuthenticated?.() &&
-      (req.user?.id === artist.user_id || req.user?.is_admin);
+    const isOwner =
+      req.isAuthenticated?.() && req.user?.id === artist.user_id;
+    const isOwnerOrAdmin = isOwner || (req.isAuthenticated?.() && req.user?.is_admin);
     if (!artist.is_approved && !isOwnerOrAdmin) {
       return res.status(403).json({ message: 'Artist pending approval' });
     }
 
+    const access_state = getArtistAccessState({
+      is_pro: user.is_pro,
+      trial_ends_at: user.trial_ends_at,
+      pro_cancelled_at: user.pro_cancelled_at,
+      stripe_customer_id: user.stripe_customer_id,
+    });
+
     const enrichedArtist = {
       ...artist,
       is_pro: user.is_pro,
-      trial_ends_at: user.trial_ends_at
+      trial_ends_at: user.trial_ends_at,
+      pro_cancelled_at: user.pro_cancelled_at,
+      access_state,
+      is_owner: !!isOwner,
     };
 
     res.json(enrichedArtist);

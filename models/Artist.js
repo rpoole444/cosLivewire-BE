@@ -20,16 +20,38 @@ const Artist = {
   },
 
   findAllPublic: async () => {
-    return knex('artists')
-      .select('display_name', 'slug', 'profile_image', 'genres', 'bio')
-      .whereNull('deleted_at')
-      .andWhere({ is_approved: true, is_listed: true  })
-      .orderBy('display_name');
+    return knex('artists as a')
+      .select(
+        'a.id',
+        'a.display_name',
+        'a.slug',
+        'a.profile_image',
+        'a.genres',
+        'a.bio',
+        'a.is_pro as artist_is_pro',
+        'a.trial_active',
+        'a.updated_at',
+        'a.user_id',
+        'u.is_pro as user_is_pro',
+        'u.trial_ends_at as user_trial_ends_at',
+        'u.pro_cancelled_at as user_pro_cancelled_at',
+        'u.stripe_customer_id as user_stripe_customer_id'
+      )
+      .leftJoin('users as u', 'a.user_id', 'u.id')
+      .whereNull('a.deleted_at')
+      .andWhere({ 'a.is_approved': true, 'a.is_listed': true })
+      .orderBy('a.display_name');
   },
 
   findBySlugWithEvents: async (slug) => {
     const artist = await knex('artists as a')
-      .select('a.*', 'u.trial_ends_at', 'u.is_pro')
+      .select(
+        'a.*',
+        'u.trial_ends_at',
+        'u.is_pro',
+        'u.pro_cancelled_at',
+        'u.stripe_customer_id'
+      )
       .leftJoin('users as u', 'a.user_id', 'u.id')
       .where('a.slug', slug)
       .andWhere('a.deleted_at', null)
