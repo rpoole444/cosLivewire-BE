@@ -7,6 +7,16 @@ const bodyParser = require('body-parser');
 const { recalcListingForUser } = require('../utils/access'); // <- add this
 const { computeProStatusFromSubscription } = require('../utils/stripeStatus');
 
+/**
+ * Stripe integration notes:
+ * - `/create-checkout-session` spins up subscription-mode Checkout sessions for Alpine Pro
+ * - `/billing-portal` issues Billing Portal sessions so users can manage/cancel
+ * - `/api/payments/webhook` listens to checkout + subscription lifecycle events and keeps the
+ *   `users` table in sync. We treat subscriptions as Pro while status is `active` or `trialing`.
+ *   If a user schedules a cancellation (cancel_at_period_end), we store that future timestamp in
+ *   `pro_cancelled_at`. When Stripe reports the subscription as canceled/inactive we clear Pro access
+ *   and record when it ended.
+ */
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -347,7 +357,7 @@ router.post('/billing-portal', async (req, res) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile`,
+      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?billingUpdate=true`,
     });
 
     res.status(200).json({ url: session.url });

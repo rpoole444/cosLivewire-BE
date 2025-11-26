@@ -20,8 +20,11 @@ function computeProStatusFromSubscription(subscription) {
 
   let proCancelledAt = null;
 
-  if (subscription.cancel_at_period_end && subscription.current_period_end) {
-    proCancelledAt = new Date(subscription.current_period_end * 1000);
+  if (subscription.cancel_at_period_end) {
+    const cancelTimestamp = subscription.cancel_at || subscription.current_period_end;
+    if (cancelTimestamp) {
+      proCancelledAt = new Date(cancelTimestamp * 1000);
+    }
   }
 
   if (!isPro) {

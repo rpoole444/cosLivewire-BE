@@ -11,6 +11,7 @@ const activeSubscription = {
 const trialCancelSubscription = {
   status: 'trialing',
   cancel_at_period_end: true,
+  cancel_at: nowSeconds + 7200,
   current_period_end: nowSeconds + 3600,
 };
 
@@ -33,8 +34,20 @@ const resultTrialCancel = computeProStatusFromSubscription(trialCancelSubscripti
 assert.strictEqual(resultTrialCancel.isPro, true, 'Trialing subscription should be pro');
 assert(resultTrialCancel.proCancelledAt instanceof Date, 'Cancel at period end sets a date');
 assert(
-  Math.abs(resultTrialCancel.proCancelledAt.getTime() - trialCancelSubscription.current_period_end * 1000) < 5,
-  'Cancel date should match current period end'
+  Math.abs(resultTrialCancel.proCancelledAt.getTime() - trialCancelSubscription.cancel_at * 1000) < 5,
+  'Cancel date should prefer cancel_at when provided'
+);
+
+const fallbackCancelSubscription = {
+  status: 'active',
+  cancel_at_period_end: true,
+  current_period_end: nowSeconds + 1800,
+};
+
+const resultFallbackCancel = computeProStatusFromSubscription(fallbackCancelSubscription);
+assert(
+  Math.abs(resultFallbackCancel.proCancelledAt.getTime() - fallbackCancelSubscription.current_period_end * 1000) < 5,
+  'Cancel date should fall back to current_period_end when cancel_at missing'
 );
 
 const resultCanceled = computeProStatusFromSubscription(canceledSubscription);
