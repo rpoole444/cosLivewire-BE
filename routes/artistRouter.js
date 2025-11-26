@@ -17,6 +17,9 @@ const Artist = require('../models/Artist');
 const { recalcListingForUser } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 
+const MAX_EMBED_URL_LENGTH = 2000;
+const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
+
 const s3 = new S3Client({
   credentials: fromEnv(),
   region: process.env.AWS_REGION,
@@ -417,6 +420,18 @@ artistRouter.put('/:slug', upload.fields([
         return [];
       })(),
     };
+
+    const tooLongField = EMBED_FIELDS.find((field) => {
+      const value = updatedFields[field];
+      return typeof value === 'string' && value.length > MAX_EMBED_URL_LENGTH;
+    });
+
+    if (tooLongField) {
+      return res.status(400).json({
+        message: 'Embed URLs must be 2000 characters or fewer.',
+        field: tooLongField,
+      });
+    }
     
     
     // Optional file updates
@@ -434,8 +449,18 @@ artistRouter.put('/:slug', upload.fields([
     }
     
 
-    const updated = await Artist.update(slug, updatedFields);
-    res.json(updated);
+    try {
+      const updated = await Artist.update(slug, updatedFields);
+      res.json(updated);
+    } catch (err) {
+      // Postgres 22001 => value too long for column; surface a helpful message.
+      if (err?.code === '22001') {
+        return res
+          .status(400)
+          .json({ message: 'One of the embed URLs is too long for the database.' });
+      }
+      throw err;
+    }
   } catch (err) {
     console.error('Error updating artist:', err);
     res.status(500).json({ message: 'Server error' });
