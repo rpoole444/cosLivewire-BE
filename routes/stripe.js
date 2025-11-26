@@ -5,35 +5,171 @@ const knex = require('../db/knex');
 const webhookRouter = express.Router(); // << separate router
 const bodyParser = require('body-parser');
 const { recalcListingForUser } = require('../utils/access'); // <- add this
-const { computeProActive } = require('../utils/proState');
+const { computeProStatusFromSubscription } = require('../utils/stripeStatus');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-const activateProForUser = async (userId, stripeCustomerId) => {
-  if (!userId) {
-    throw new Error('activateProForUser requires a userId');
+const STRIPE_LOG_PREFIX = '[stripe-webhook]';
+
+const getCustomerIdFromSubscription = (subscription) => {
+  if (!subscription) return null;
+  if (typeof subscription.customer === 'string') return subscription.customer;
+  return subscription.customer?.id || null;
+};
+
+const updateArtistProState = async (userId, isPro) => {
+  const update = {
+    is_pro: isPro,
+    updated_at: new Date(),
+  };
+
+  if (isPro) {
+    update.trial_active = false;
   }
 
-  const updateFields = {
-    is_pro: true,
-    trial_ends_at: null,
-    stripe_customer_id: stripeCustomerId,
-    pro_cancelled_at: null,
+  await knex('artists').where({ user_id: userId }).update(update);
+  await recalcListingForUser(userId);
+};
+
+const syncUserWithSubscription = async (subscription, explicitUser) => {
+  const customerId = getCustomerIdFromSubscription(subscription);
+  if (!customerId && !explicitUser) {
+    console.warn(`${STRIPE_LOG_PREFIX} missing customer id on subscription`, {
+      subscriptionId: subscription?.id,
+    });
+    return;
+  }
+
+  let user = explicitUser;
+  if (!user && customerId) {
+    user = await knex('users').where({ stripe_customer_id: customerId }).first();
+  }
+
+  if (!user) {
+    console.warn(`${STRIPE_LOG_PREFIX} no user found for subscription`, {
+      subscriptionId: subscription?.id,
+      customerId,
+    });
+    return;
+  }
+
+  const { isPro, proCancelledAt } = computeProStatusFromSubscription(subscription);
+
+  const userUpdates = {
+    is_pro: isPro,
+    pro_cancelled_at: proCancelledAt,
+    stripe_customer_id: customerId || user.stripe_customer_id,
     updated_at: knex.fn.now(),
   };
 
-  await knex('users').where({ id: userId }).update(updateFields);
+  if (isPro) {
+    userUpdates.trial_ends_at = null;
+  }
 
-  await knex('artists')
-    .where({ user_id: userId })
-    .update({
-      is_pro: true,
-      trial_active: false,
-      updated_at: new Date(),
+  await knex('users').where({ id: user.id }).update(userUpdates);
+
+  await updateArtistProState(user.id, isPro);
+
+  console.log(`${STRIPE_LOG_PREFIX} updated user`, user.id, {
+    isPro,
+    proCancelledAt,
+    subscriptionId: subscription?.id,
+    status: subscription?.status,
+  });
+};
+
+const findUserForCheckoutSession = async (sessionCustomerId, session) => {
+  const metadataUserId = session.metadata?.userId || session.metadata?.user_id;
+  if (metadataUserId) {
+    const user = await knex('users').where({ id: metadataUserId }).first();
+    if (user) return user;
+  }
+
+  if (sessionCustomerId) {
+    const user = await knex('users').where({ stripe_customer_id: sessionCustomerId }).first();
+    if (user) return user;
+  }
+
+  const email =
+    session.customer_details?.email ||
+    session.customer_email ||
+    session.metadata?.email ||
+    null;
+
+  if (email) {
+    const user = await knex('users')
+      .whereRaw('LOWER(email) = ?', email.toLowerCase())
+      .first();
+    if (user) return user;
+  }
+
+  return null;
+};
+
+const handleCheckoutSessionCompleted = async (session) => {
+  if (session.mode !== 'subscription') {
+    console.log(`${STRIPE_LOG_PREFIX} session completed for non-subscription`, { sessionId: session.id });
+    return;
+  }
+
+  const sessionCustomerId =
+    typeof session.customer === 'string' ? session.customer : session.customer?.id;
+  const user = await findUserForCheckoutSession(sessionCustomerId, session);
+
+  if (!user) {
+    console.warn(`${STRIPE_LOG_PREFIX} checkout session without matching user`, {
+      sessionId: session.id,
+      customerId: sessionCustomerId,
     });
+    return;
+  }
 
-  await recalcListingForUser(userId);
+  if (sessionCustomerId && user.stripe_customer_id !== sessionCustomerId) {
+    await knex('users')
+      .where({ id: user.id })
+      .update({
+        stripe_customer_id: sessionCustomerId,
+        updated_at: knex.fn.now(),
+      });
+    user.stripe_customer_id = sessionCustomerId;
+    console.log(`${STRIPE_LOG_PREFIX} stored stripe_customer_id for user`, user.id, {
+      customerId: sessionCustomerId,
+    });
+  }
+
+  const subscriptionId =
+    typeof session.subscription === 'string'
+      ? session.subscription
+      : session.subscription?.id;
+
+  if (!subscriptionId) {
+    console.warn(`${STRIPE_LOG_PREFIX} checkout session missing subscription`, {
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  try {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    await syncUserWithSubscription(subscription, user);
+  } catch (err) {
+    console.error(`${STRIPE_LOG_PREFIX} failed to retrieve subscription`, {
+      subscriptionId,
+      error: err.message,
+    });
+  }
+};
+
+const handleSubscriptionLifecycleEvent = async (eventType, subscription) => {
+  const customerId = getCustomerIdFromSubscription(subscription);
+  console.log(`${STRIPE_LOG_PREFIX} event`, eventType, {
+    customerId,
+    subscriptionId: subscription?.id,
+    status: subscription?.status,
+    cancel_at_period_end: subscription?.cancel_at_period_end,
+  });
+  await syncUserWithSubscription(subscription);
 };
 
 // 🟣 Tip session
@@ -162,187 +298,21 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
     objectId: data?.id,
   });
 
-  // ---------------------
-  // 1️⃣ Subscription Created
-  // ---------------------
-  if (eventType === 'checkout.session.completed') {
-    const { customer: customerId, mode, metadata, customer_email } = data;
-    const userId = metadata?.userId || metadata?.user_id;
-
-    console.log('[stripe.checkout.session.completed]', {
-      mode,
-      userId,
-      customerId,
-      sessionId: data.id,
-    });
-
-    if (mode !== 'subscription') {
-      return res.status(200).send('Not a subscription');
+  try {
+    switch (eventType) {
+      case 'checkout.session.completed':
+        await handleCheckoutSessionCompleted(data);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        await handleSubscriptionLifecycleEvent(eventType, data);
+        break;
+      default:
+        break;
     }
-
-    if (!userId && !customer_email) {
-      console.warn(`⚠️ No userId or customer_email in metadata`);
-      return res.status(400).send('Missing user identification');
-    }
-
-    try {
-      if (userId) {
-        await activateProForUser(userId, customerId);
-        const user = await knex('users').where({ id: userId }).first();
-        console.log(`✅ Activated Pro for user ${user?.email || userId}`);
-      } else {
-        const user = await knex('users')
-          .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
-          .first();
-
-        if (!user) {
-          console.warn(`⚠️ User not found for email ${customer_email}`);
-        } else {
-          await activateProForUser(user.id, customerId);
-          console.log(`✅ Activated Pro via email fallback for ${user.email}`);
-        }
-      }
-    } catch (err) {
-      console.error('❌ DB update error:', err);
-      return res.status(500).send('Failed to update subscription status');
-    }
-  }
-
-  // ---------------------
-  // 2️⃣ Subscription Cancelled Immediately
-  // ---------------------
-  if (eventType === 'customer.subscription.deleted') {
-    const { customer: customerId } = data;
-
-    try {
-      const user = await knex('users').where({ stripe_customer_id: customerId }).first();
-      if (!user) {
-        console.warn(`⚠️ No user found with stripe_customer_id: ${customerId}`);
-        return;
-      }
-
-      await knex('users').where({ id: user.id }).update({
-        is_pro: false,
-        pro_cancelled_at: new Date(),
-      });
-
-      await knex('artists')
-        .where({ user_id: user.id })
-        .update({
-          is_pro: false,
-          updated_at: new Date(),
-        });
-
-      await recalcListingForUser(user.id);
-
-      console.log(`🛑 Subscription deleted: ${user.email}`);
-    } catch (err) {
-      console.error('❌ Error in subscription.deleted handler:', err.message);
-    }
-  }
-
-  // ---------------------
-  // 3️⃣ Subscription Updated (cancel_at_period_end)
-  // ---------------------
-  if (eventType === 'customer.subscription.updated') {
-    const subscription = data;
-    const {
-      customer: customerId,
-      cancel_at_period_end,
-      status,
-    } = subscription;
-    const rawCurrentPeriodEnd =
-      subscription.current_period_end ??
-      subscription.items?.data?.[0]?.current_period_end ??
-      null;
-
-    try {
-      const user = await knex('users').where({ stripe_customer_id: customerId }).first();
-      if (!user) {
-        console.warn(`⚠️ No user found for customer: ${customerId}`);
-        return;
-      }
-
-      console.log('[stripe.subscription.updated]', {
-        event: eventType,
-        subscription: subscription.id,
-        customer: customerId,
-        cancel_at_period_end,
-        current_period_end: rawCurrentPeriodEnd,
-        status,
-      });
-
-      console.log('[stripe.updated.before]', user.email, {
-        is_pro: user.is_pro,
-        pro_cancelled_at: user.pro_cancelled_at,
-      });
-
-      let userUpdated = false;
-
-      if (cancel_at_period_end && rawCurrentPeriodEnd) {
-        const cancelDate = new Date(rawCurrentPeriodEnd * 1000);
-        await knex('users')
-          .where({ id: user.id })
-          .update({ pro_cancelled_at: cancelDate });
-
-        await recalcListingForUser(user.id);
-        console.log(`⏰ Scheduled cancellation for ${user.email} at ${cancelDate.toISOString()}`);
-        userUpdated = true;
-      } else if (cancel_at_period_end && !rawCurrentPeriodEnd) {
-        console.warn(
-          `⚠️ [stripe.subscription.updated] Missing current_period_end for ${user.email}, skipping schedule`
-        );
-      } else if (!cancel_at_period_end && status === 'active') {
-        await knex('users')
-          .where({ id: user.id })
-          .update({
-            is_pro: true,
-            pro_cancelled_at: null,
-          });
-
-        await knex('artists')
-          .where({ user_id: user.id })
-          .update({
-            is_pro: true,
-            trial_active: false,
-            updated_at: new Date(),
-          });
-
-        await recalcListingForUser(user.id);
-        console.log(`✅ Renewed subscription for ${user.email}, cleared pro_cancelled_at`);
-        userUpdated = true;
-      } else if (status === 'canceled') {
-        await knex('users')
-          .where({ id: user.id })
-          .update({
-            is_pro: false,
-            pro_cancelled_at: new Date(),
-          });
-
-        await knex('artists')
-          .where({ user_id: user.id })
-          .update({
-            is_pro: false,
-            updated_at: new Date(),
-          });
-
-        await recalcListingForUser(user.id);
-        console.log(`🚫 Subscription canceled for ${user.email}`);
-        userUpdated = true;
-      }
-
-      if (userUpdated) {
-        const freshUser = await knex('users').where({ id: user.id }).first();
-        const pro_active = computeProActive(freshUser);
-        console.log('[stripe.updated.after]', freshUser.email, {
-          is_pro: freshUser.is_pro,
-          pro_cancelled_at: freshUser.pro_cancelled_at,
-          pro_active,
-        });
-      }
-    } catch (err) {
-      console.error('❌ Error in subscription.updated handler:', err.message);
-    }
+  } catch (err) {
+    console.error(`${STRIPE_LOG_PREFIX} handler error`, err);
   }
 
   return res.status(200).json({ received: true });
