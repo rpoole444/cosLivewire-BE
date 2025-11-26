@@ -5,6 +5,7 @@
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "check-pro-status": "node scripts/checkProStatus.js",
     "start": "node app.js",
     "migrate": "knex migrate:latest"
   },

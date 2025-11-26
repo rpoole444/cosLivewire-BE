@@ -8,6 +8,33 @@ const { recalcListingForUser } = require('../utils/access'); // <- add this
 const { computeProActive } = require('../utils/proState');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+const activateProForUser = async (userId, stripeCustomerId) => {
+  if (!userId) {
+    throw new Error('activateProForUser requires a userId');
+  }
+
+  const updateFields = {
+    is_pro: true,
+    trial_ends_at: null,
+    stripe_customer_id: stripeCustomerId,
+    pro_cancelled_at: null,
+    updated_at: knex.fn.now(),
+  };
+
+  await knex('users').where({ id: userId }).update(updateFields);
+
+  await knex('artists')
+    .where({ user_id: userId })
+    .update({
+      is_pro: true,
+      trial_active: false,
+      updated_at: new Date(),
+    });
+
+  await recalcListingForUser(userId);
+};
 
 // 🟣 Tip session
 router.post('/create-tip-session', async (req, res) => {
@@ -84,16 +111,23 @@ router.post('/create-checkout-session', async (req, res) => {
       return res.status(409).json({ message: 'Already Pro. No checkout needed.' });
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const sessionPayload = {
       payment_method_types: ['card'],
       mode: 'subscription',
-      customer_email: user.email,
       line_items: [{ price: priceId, quantity: 1 }],
-      metadata: { user_id: userId, plan },
+      metadata: { userId: String(userId), user_id: String(userId), plan },
       automatic_tax: { enabled: true },
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?canceled=true`,
-    });
+    };
+
+    if (user.stripe_customer_id) {
+      sessionPayload.customer = user.stripe_customer_id;
+    } else {
+      sessionPayload.customer_email = user.email;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionPayload);
 
     return res.status(200).json({ url: session.url });
   } catch (err) {
@@ -108,8 +142,13 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
   const sig = req.headers['stripe-signature'];
   let event;
 
+  if (!stripeWebhookSecret) {
+    console.error('❌ STRIPE_WEBHOOK_SECRET is not configured.');
+    return res.status(500).send('Stripe webhook misconfiguration');
+  }
+
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
   } catch (err) {
     console.error('❌ Stripe signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -118,16 +157,28 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
   const eventType = event.type;
   const data = event.data.object;
 
-  console.log('🔔 Stripe Event Received:', eventType);
+  console.log('🔔 Stripe Event Received:', eventType, {
+    id: event.id,
+    objectId: data?.id,
+  });
 
   // ---------------------
   // 1️⃣ Subscription Created
   // ---------------------
   if (eventType === 'checkout.session.completed') {
     const { customer: customerId, mode, metadata, customer_email } = data;
-    const userId = metadata?.user_id;
+    const userId = metadata?.userId || metadata?.user_id;
 
-    if (mode !== 'subscription') return res.status(200).send('Not a subscription');
+    console.log('[stripe.checkout.session.completed]', {
+      mode,
+      userId,
+      customerId,
+      sessionId: data.id,
+    });
+
+    if (mode !== 'subscription') {
+      return res.status(200).send('Not a subscription');
+    }
 
     if (!userId && !customer_email) {
       console.warn(`⚠️ No userId or customer_email in metadata`);
@@ -135,43 +186,25 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
     }
 
     try {
-      let user;
-      const updateFields = {
-        is_pro: true,
-        trial_ends_at: null,
-        stripe_customer_id: customerId,
-        pro_cancelled_at: null,
-      };
-
       if (userId) {
-        await knex('users').where({ id: userId }).update(updateFields);
-        user = await knex('users').where({ id: userId }).first();
+        await activateProForUser(userId, customerId);
+        const user = await knex('users').where({ id: userId }).first();
+        console.log(`✅ Activated Pro for user ${user?.email || userId}`);
       } else {
-        await knex('users')
-          .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
-          .update(updateFields);
-        user = await knex('users')
+        const user = await knex('users')
           .whereRaw('LOWER(email) = ?', customer_email.toLowerCase())
           .first();
-      }
 
-      if (user) {
-        await knex('artists')
-          .where({ user_id: user.id })
-          .update({
-            is_pro: true,
-            trial_active: false,
-            updated_at: new Date(),
-          });
-
-        await recalcListingForUser(user.id);
-
-        console.log(`✅ Created subscription for ${user.email || user.id}`);
-      } else {
-        console.warn(`⚠️ User not found for checkout.session.completed`);
+        if (!user) {
+          console.warn(`⚠️ User not found for email ${customer_email}`);
+        } else {
+          await activateProForUser(user.id, customerId);
+          console.log(`✅ Activated Pro via email fallback for ${user.email}`);
+        }
       }
     } catch (err) {
-      console.error('❌ DB update error:', err.message);
+      console.error('❌ DB update error:', err);
+      return res.status(500).send('Failed to update subscription status');
     }
   }
 
