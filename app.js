@@ -84,8 +84,13 @@ app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide 
 
 // Error handling middleware should be the last piece of middleware added to the app
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send('Something broke!');
+  console.error('[ERROR HANDLER]', err);
+  const status = err.status || err.statusCode || 500;
+
+  res.status(status).json({
+    error: 'Internal server error',
+    message: err.message || 'Something broke!',
+  });
 });
 
 const PORT = process.env.PORT || 3000;
