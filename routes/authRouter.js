@@ -12,6 +12,12 @@ const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserByI
 const { computeProActive } = require('../utils/proState');
 
 const authRouter = express.Router();
+authRouter.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
 
 const s3 = new S3Client({
   credentials: fromEnv(),
