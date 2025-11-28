@@ -6,6 +6,7 @@ const webhookRouter = express.Router(); // << separate router
 const bodyParser = require('body-parser');
 const { recalcListingForUser } = require('../utils/access'); // <- add this
 const { computeProStatusFromSubscription } = require('../utils/stripeStatus');
+const { createTip } = require('../models/Tip');
 
 /**
  * Stripe integration notes:
@@ -118,55 +119,110 @@ const findUserForCheckoutSession = async (sessionCustomerId, session) => {
 };
 
 const handleCheckoutSessionCompleted = async (session) => {
-  if (session.mode !== 'subscription') {
-    console.log(`${STRIPE_LOG_PREFIX} session completed for non-subscription`, { sessionId: session.id });
-    return;
-  }
+  if (session.mode === 'subscription') {
+    const sessionCustomerId =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    const user = await findUserForCheckoutSession(sessionCustomerId, session);
 
-  const sessionCustomerId =
-    typeof session.customer === 'string' ? session.customer : session.customer?.id;
-  const user = await findUserForCheckoutSession(sessionCustomerId, session);
-
-  if (!user) {
-    console.warn(`${STRIPE_LOG_PREFIX} checkout session without matching user`, {
-      sessionId: session.id,
-      customerId: sessionCustomerId,
-    });
-    return;
-  }
-
-  if (sessionCustomerId && user.stripe_customer_id !== sessionCustomerId) {
-    await knex('users')
-      .where({ id: user.id })
-      .update({
-        stripe_customer_id: sessionCustomerId,
-        updated_at: knex.fn.now(),
+    if (!user) {
+      console.warn(`${STRIPE_LOG_PREFIX} checkout session without matching user`, {
+        sessionId: session.id,
+        customerId: sessionCustomerId,
       });
-    user.stripe_customer_id = sessionCustomerId;
-    console.log(`${STRIPE_LOG_PREFIX} stored stripe_customer_id for user`, user.id, {
-      customerId: sessionCustomerId,
+      return;
+    }
+
+    if (sessionCustomerId && user.stripe_customer_id !== sessionCustomerId) {
+      await knex('users')
+        .where({ id: user.id })
+        .update({
+          stripe_customer_id: sessionCustomerId,
+          updated_at: knex.fn.now(),
+        });
+      user.stripe_customer_id = sessionCustomerId;
+      console.log(`${STRIPE_LOG_PREFIX} stored stripe_customer_id for user`, user.id, {
+        customerId: sessionCustomerId,
+      });
+    }
+
+    const subscriptionId =
+      typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id;
+
+    if (!subscriptionId) {
+      console.warn(`${STRIPE_LOG_PREFIX} checkout session missing subscription`, {
+        sessionId: session.id,
+      });
+      return;
+    }
+
+    try {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      await syncUserWithSubscription(subscription, user);
+    } catch (err) {
+      console.error(`${STRIPE_LOG_PREFIX} failed to retrieve subscription`, {
+        subscriptionId,
+        error: err.message,
+      });
+    }
+  } else if (session.mode === 'payment' && session.metadata?.intent === 'tip') {
+    await recordTipFromSession(session);
+  } else {
+    console.log(`${STRIPE_LOG_PREFIX} checkout session ignored`, {
+      sessionId: session.id,
+      mode: session.mode,
+      metadataIntent: session.metadata?.intent,
     });
   }
+};
 
-  const subscriptionId =
-    typeof session.subscription === 'string'
-      ? session.subscription
-      : session.subscription?.id;
+const recordTipFromSession = async (session) => {
+  const metadata = session.metadata || {};
+  const artistId = metadata.artist_id ? Number(metadata.artist_id) : null;
+  const tipAmountCents = metadata.tip_amount_cents ? Number(metadata.tip_amount_cents) : null;
 
-  if (!subscriptionId) {
-    console.warn(`${STRIPE_LOG_PREFIX} checkout session missing subscription`, {
+  if (!artistId || !tipAmountCents) {
+    console.warn(`${STRIPE_LOG_PREFIX} tip session missing artist or amount`, {
       sessionId: session.id,
+      metadata,
     });
     return;
   }
+
+  let tipperUserId = metadata.tipper_user_id ? Number(metadata.tipper_user_id) : null;
+
+  if (!tipperUserId) {
+    const sessionCustomerId =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    const fallbackUser = await findUserForCheckoutSession(sessionCustomerId, session);
+    tipperUserId = fallbackUser?.id || null;
+  }
+
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id || null;
 
   try {
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    await syncUserWithSubscription(subscription, user);
+    await createTip({
+      tipperUserId,
+      artistId,
+      amountCents: tipAmountCents,
+      stripeSessionId: session.id,
+      stripePaymentIntentId: paymentIntentId,
+    });
+
+    console.log(`${STRIPE_LOG_PREFIX} recorded tip`, {
+      artistId,
+      tipperUserId,
+      amountCents: tipAmountCents,
+      sessionId: session.id,
+    });
   } catch (err) {
-    console.error(`${STRIPE_LOG_PREFIX} failed to retrieve subscription`, {
-      subscriptionId,
-      error: err.message,
+    console.error(`${STRIPE_LOG_PREFIX} failed to record tip`, {
+      sessionId: session.id,
+      error: err,
     });
   }
 };
@@ -182,54 +238,88 @@ const handleSubscriptionLifecycleEvent = async (eventType, subscription) => {
   await syncUserWithSubscription(subscription);
 };
 
-// 🟣 Tip session
+// 🟣 Tip session (one-time Checkout payment)
 router.post('/create-tip-session', async (req, res) => {
-  const { email, mode, amount, plan} = req.body;
+  const rawArtistId = req.body.artistId ?? req.body.artist_id;
+  const artistId = rawArtistId ? Number(rawArtistId) : null;
+  const rawAmount = Number(req.body.amount);
 
-  if (!email || !mode || !amount) {
-    return res.status(400).json({ message: 'Missing required info: email, mode, amount' });
+  if (!artistId || Number.isNaN(artistId)) {
+    return res.status(400).json({ message: 'artistId is required for tipping.' });
+  }
+
+  if (!rawAmount || Number.isNaN(rawAmount) || rawAmount <= 0) {
+    return res.status(400).json({ message: 'amount must be a positive number.' });
+  }
+
+  const amountCents = Math.round(rawAmount * 100);
+  if (amountCents < 100) {
+    return res.status(400).json({ message: 'Minimum tip is $1.00.' });
+  }
+
+  const tipperUserId = req.user?.id || req.body.userId || req.body.user_id || null;
+  const customerEmail = req.user?.email || req.body.email || null;
+
+  if (!customerEmail && !tipperUserId) {
+    return res.status(400).json({ message: 'A logged-in user or email is required to tip.' });
   }
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const artist = await knex('artists').where({ id: artistId }).first();
+    if (!artist) {
+      return res.status(404).json({ message: 'Artist not found' });
+    }
+
+    const sessionPayload = {
       payment_method_types: ['card'],
-      mode, // 'payment' for one-time, 'subscription' for monthly
-      customer_email: email,
+      mode: 'payment',
       line_items: [
         {
           price_data: {
             currency: 'usd',
-            unit_amount: amount * 100, // e.g. 700 → $7.00
+            unit_amount: amountCents,
             product_data: {
-              name: mode === 'subscription' ? 'Monthly Supporter Tip' : 'One-Time Tip',
-              description: mode === 'subscription'
-                ? 'Monthly tip to support Alpine Groove Guide. Cancel anytime.'
-                : 'One-time thank-you tip to support the platform.',
+              name: 'One-Time Tip',
+              description: 'One-time tip to support Alpine Groove Guide / this artist.',
             },
-            recurring: mode === 'subscription' ? { interval: 'month' } : undefined,
           },
           quantity: 1,
         },
       ],
       metadata: {
-        user_id: userId,
-        plan,
-        purpose: 'support',
-        type: mode,
-        intent: 'publish_artist',
-        artist_id: String(artistId || ''),
+        intent: 'tip',
+        artist_id: String(artistId),
+        tip_amount_cents: String(amountCents),
       },
-      automatic_tax: { enabled: true }, 
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?cancelled=true`,
-    });
+      automatic_tax: { enabled: true },
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipSuccess=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipCancelled=true`,
+    };
+
+    if (tipperUserId) {
+      sessionPayload.metadata.tipper_user_id = String(tipperUserId);
+    }
+
+    if (customerEmail) {
+      sessionPayload.customer_email = customerEmail;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionPayload);
 
     return res.status(200).json({ url: session.url });
   } catch (err) {
-    console.error('Stripe tip session error:', err.message);
+    console.error('Stripe tip session error:', err);
     return res.status(500).json({ message: 'Failed to create tip session' });
   }
 });
+
+/**
+ * Manual QA for tipping:
+ * 1. Create a test artist + user, hit POST /api/payments/create-tip-session with { artistId, amount }.
+ * 2. Complete Checkout in Stripe test mode.
+ * 3. Confirm Stripe payment succeeds and the backend logs "[stripe-webhook] recorded tip".
+ * 4. Verify the `tips` table has a row with the user/artist/amount and `/api/auth/session` still reflects the user's Pro status unchanged.
+ */
 
 // Create a subscription checkout session
 router.post('/create-checkout-session', async (req, res) => {
