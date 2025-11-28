@@ -166,8 +166,8 @@ const handleCheckoutSessionCompleted = async (session) => {
         error: err.message,
       });
     }
-  } else if (session.mode === 'payment' && session.metadata?.intent === 'tip') {
-    await recordTipFromSession(session);
+  } else if (session.mode === 'payment' && session.metadata?.intent === 'platform_tip') {
+    await recordPlatformTipFromSession(session);
   } else {
     console.log(`${STRIPE_LOG_PREFIX} checkout session ignored`, {
       sessionId: session.id,
@@ -177,15 +177,17 @@ const handleCheckoutSessionCompleted = async (session) => {
   }
 };
 
-const recordTipFromSession = async (session) => {
+const recordPlatformTipFromSession = async (session) => {
   const metadata = session.metadata || {};
-  const artistId = metadata.artist_id ? Number(metadata.artist_id) : null;
-  const tipAmountCents = metadata.tip_amount_cents ? Number(metadata.tip_amount_cents) : null;
+  let tipAmountCents = metadata.tip_amount_cents ? Number(metadata.tip_amount_cents) : null;
 
-  if (!artistId || !tipAmountCents) {
-    console.warn(`${STRIPE_LOG_PREFIX} tip session missing artist or amount`, {
+  if (!tipAmountCents || Number.isNaN(tipAmountCents)) {
+    tipAmountCents = session.amount_total || null;
+  }
+
+  if (!tipAmountCents) {
+    console.warn(`${STRIPE_LOG_PREFIX} platform tip session missing amount`, {
       sessionId: session.id,
-      metadata,
     });
     return;
   }
@@ -199,6 +201,8 @@ const recordTipFromSession = async (session) => {
     tipperUserId = fallbackUser?.id || null;
   }
 
+  const source = metadata.source === 'public' ? 'public' : 'profile';
+
   const paymentIntentId =
     typeof session.payment_intent === 'string'
       ? session.payment_intent
@@ -207,20 +211,21 @@ const recordTipFromSession = async (session) => {
   try {
     await createTip({
       tipperUserId,
-      artistId,
+      artistId: null,
       amountCents: tipAmountCents,
       stripeSessionId: session.id,
       stripePaymentIntentId: paymentIntentId,
+      source,
     });
 
-    console.log(`${STRIPE_LOG_PREFIX} recorded tip`, {
-      artistId,
+    console.log(`${STRIPE_LOG_PREFIX} recorded platform tip`, {
       tipperUserId,
       amountCents: tipAmountCents,
       sessionId: session.id,
+      source,
     });
   } catch (err) {
-    console.error(`${STRIPE_LOG_PREFIX} failed to record tip`, {
+    console.error(`${STRIPE_LOG_PREFIX} failed to record platform tip`, {
       sessionId: session.id,
       error: err,
     });
@@ -240,36 +245,18 @@ const handleSubscriptionLifecycleEvent = async (eventType, subscription) => {
 
 // 🟣 Tip session (one-time Checkout payment)
 router.post('/create-tip-session', async (req, res) => {
-  const rawArtistId = req.body.artistId ?? req.body.artist_id;
-  const artistId = rawArtistId ? Number(rawArtistId) : null;
   const rawAmount = Number(req.body.amount);
+  const source = req.body.source === 'public' ? 'public' : 'profile';
 
-  if (!artistId || Number.isNaN(artistId)) {
-    return res.status(400).json({ message: 'artistId is required for tipping.' });
-  }
-
-  if (!rawAmount || Number.isNaN(rawAmount) || rawAmount <= 0) {
-    return res.status(400).json({ message: 'amount must be a positive number.' });
+  if (!rawAmount || Number.isNaN(rawAmount) || rawAmount < 1) {
+    return res.status(400).json({ message: 'amount must be at least $1.' });
   }
 
   const amountCents = Math.round(rawAmount * 100);
-  if (amountCents < 100) {
-    return res.status(400).json({ message: 'Minimum tip is $1.00.' });
-  }
-
-  const tipperUserId = req.user?.id || req.body.userId || req.body.user_id || null;
-  const customerEmail = req.user?.email || req.body.email || null;
-
-  if (!customerEmail && !tipperUserId) {
-    return res.status(400).json({ message: 'A logged-in user or email is required to tip.' });
-  }
+  const tipperUserId = req.user?.id || null;
+  const customerEmail = req.user?.email || null;
 
   try {
-    const artist = await knex('artists').where({ id: artistId }).first();
-    if (!artist) {
-      return res.status(404).json({ message: 'Artist not found' });
-    }
-
     const sessionPayload = {
       payment_method_types: ['card'],
       mode: 'payment',
@@ -279,26 +266,30 @@ router.post('/create-tip-session', async (req, res) => {
             currency: 'usd',
             unit_amount: amountCents,
             product_data: {
-              name: 'One-Time Tip',
-              description: 'One-time tip to support Alpine Groove Guide / this artist.',
+              name: 'Support Alpine Groove Guide',
+              description:
+                'One-time tip to help keep the Alpine Groove Guide running for local artists and venues.',
             },
           },
           quantity: 1,
         },
       ],
       metadata: {
-        intent: 'tip',
-        artist_id: String(artistId),
+        intent: 'platform_tip',
         tip_amount_cents: String(amountCents),
+        tipper_user_id: tipperUserId ? String(tipperUserId) : '',
+        source,
       },
       automatic_tax: { enabled: true },
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipSuccess=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipCancelled=true`,
+      success_url:
+        source === 'public'
+          ? `${process.env.NEXT_PUBLIC_SITE_URL}/about?tipSuccess=true`
+          : `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipSuccess=true`,
+      cancel_url:
+        source === 'public'
+          ? `${process.env.NEXT_PUBLIC_SITE_URL}/about?tipCancelled=true`
+          : `${process.env.NEXT_PUBLIC_SITE_URL}/UserProfile?tipCancelled=true`,
     };
-
-    if (tipperUserId) {
-      sessionPayload.metadata.tipper_user_id = String(tipperUserId);
-    }
 
     if (customerEmail) {
       sessionPayload.customer_email = customerEmail;
@@ -314,11 +305,9 @@ router.post('/create-tip-session', async (req, res) => {
 });
 
 /**
- * Manual QA for tipping:
- * 1. Create a test artist + user, hit POST /api/payments/create-tip-session with { artistId, amount }.
- * 2. Complete Checkout in Stripe test mode.
- * 3. Confirm Stripe payment succeeds and the backend logs "[stripe-webhook] recorded tip".
- * 4. Verify the `tips` table has a row with the user/artist/amount and `/api/auth/session` still reflects the user's Pro status unchanged.
+ * Manual QA for platform tips:
+ * - From a logged-in UserProfile: POST /api/payments/create-tip-session { amount: 7, source: 'profile' }, complete checkout, confirm redirect with tipSuccess=true and DB row with source=profile.
+ * - From the public About/support page (logged out): POST /api/payments/create-tip-session { amount: 5, source: 'public' }, complete checkout, confirm redirect to /about?tipSuccess=true and DB row with source=public & tipper_user_id null.
  */
 
 // Create a subscription checkout session
