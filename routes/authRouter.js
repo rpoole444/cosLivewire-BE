@@ -104,23 +104,27 @@ authRouter.post('/register', async (req, res, next) => {
     if (inviteCode) {
       const invite = await findInviteByCode(inviteCode);
       if (invite) {
-        const hasCapacity =
-          invite.max_uses == null || invite.used_count < invite.max_uses;
-        if (hasCapacity) {
-          if (
-            invite.email &&
-            invite.email.toLowerCase() !== normalizedEmail.toLowerCase()
-          ) {
-            console.warn(
-              '[register] invite email mismatch',
-              invite.email,
-              normalizedEmail
-            );
-          }
-          trialDays = invite.trial_days || defaultTrialDays;
-          appliedInvite = invite;
+        if (invite.is_active === false) {
+          console.warn('[register] invite inactive', invite.code);
         } else {
-          console.warn('[register] invite max uses reached for', invite.code);
+          const hasCapacity =
+            invite.max_uses == null || invite.used_count < invite.max_uses;
+          if (hasCapacity) {
+            if (
+              invite.email &&
+              invite.email.toLowerCase() !== normalizedEmail.toLowerCase()
+            ) {
+              console.warn(
+                '[register] invite email mismatch',
+                invite.email,
+                normalizedEmail
+              );
+            }
+            trialDays = invite.trial_days || defaultTrialDays;
+            appliedInvite = invite;
+          } else {
+            console.warn('[register] invite max uses reached for', invite.code);
+          }
         }
       } else {
         console.warn('[register] invite code not found', inviteCode);

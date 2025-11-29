@@ -13,6 +13,7 @@ const initializePassport = require('./passport-config');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
 const artistRouter = require('./routes/artistRouter');
+const inviteRouter = require('./routes/inviteRouter');
 const { router: stripeRouter, webhookRouter } = require('./routes/stripe');
 
 const { findUserByEmail, findUserById } = require('./models/User');
@@ -79,6 +80,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/events', eventRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/artists', artistRouter);
+app.use('/api/invites', inviteRouter);
 app.use('/api/payments', stripeRouter);
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
