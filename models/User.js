@@ -21,6 +21,8 @@ const createUser = async ({
   userDescription = '',
   topMusicGenres = [], // Ensure this is an array
   is_admin = false,
+  trialActive = true,
+  trialEndsAt = null,
 }) => {
   const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS) || 10);
 
@@ -33,6 +35,9 @@ const createUser = async ({
     user_description: userDescription,
     top_music_genres: JSON.stringify(topMusicGenres), // Saving the array as a JSON string
     is_admin,
+    trial_active: trialActive,
+    trial_ends_at: trialEndsAt,
+    is_pro: false,
   }).returning('*');
 
   return newUser;

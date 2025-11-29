@@ -10,6 +10,7 @@ const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
 const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
 const { computeProActive } = require('../utils/proState');
+const { findInviteByCode, markInviteUsed } = require('../models/Invite');
 
 const authRouter = express.Router();
 authRouter.use((req, res, next) => {
@@ -72,7 +73,7 @@ authRouter.delete('/users/:id', async (req, res) => {
 // User registration
 authRouter.post('/register', async (req, res, next) => {
   try {
-    const { first_name, last_name, displayName, email, password, user_description, top_music_genres } = req.body;
+    const { first_name, last_name, displayName, email, password, user_description, top_music_genres, inviteCode } = req.body;
 
     if (!first_name || !last_name || !email || !password) {
       return res.status(400).json({ error: 'Please provide an email and password' });
@@ -96,6 +97,39 @@ authRouter.post('/register', async (req, res, next) => {
       ? JSON.parse(top_music_genres).slice(0, 3)
       : [];
 
+    const defaultTrialDays = Number(process.env.DEFAULT_TRIAL_DAYS) || 30;
+    let trialDays = defaultTrialDays;
+    let appliedInvite = null;
+
+    if (inviteCode) {
+      const invite = await findInviteByCode(inviteCode);
+      if (invite) {
+        const hasCapacity =
+          invite.max_uses == null || invite.used_count < invite.max_uses;
+        if (hasCapacity) {
+          if (
+            invite.email &&
+            invite.email.toLowerCase() !== normalizedEmail.toLowerCase()
+          ) {
+            console.warn(
+              '[register] invite email mismatch',
+              invite.email,
+              normalizedEmail
+            );
+          }
+          trialDays = invite.trial_days || defaultTrialDays;
+          appliedInvite = invite;
+        } else {
+          console.warn('[register] invite max uses reached for', invite.code);
+        }
+      } else {
+        console.warn('[register] invite code not found', inviteCode);
+      }
+    }
+
+    const now = new Date();
+    const trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
+
     const newUser = await createUser({
       firstName: first_name,
       lastName: last_name,
@@ -104,7 +138,13 @@ authRouter.post('/register', async (req, res, next) => {
       password,
       userDescription: user_description,
       topMusicGenres: genres, // Save as array
+      trialEndsAt,
+      trialActive: true,
     });
+
+    if (appliedInvite) {
+      await markInviteUsed(appliedInvite.id);
+    }
 
     const { password: _, ...userWithoutPassword } = newUser;
 
