@@ -98,7 +98,7 @@ authRouter.post('/register', async (req, res, next) => {
       : [];
 
     const defaultTrialDays = Number(process.env.DEFAULT_TRIAL_DAYS) || 30;
-    let trialDays = defaultTrialDays;
+    let trialDays = null;
     let appliedInvite = null;
 
     if (inviteCode) {
@@ -131,8 +131,13 @@ authRouter.post('/register', async (req, res, next) => {
       }
     }
 
-    const now = new Date();
-    const trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    let trialEndsAt = null;
+    let trialActive = false;
+    if (trialDays) {
+      const now = new Date();
+      trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
+      trialActive = true;
+    }
 
     const newUser = await createUser({
       firstName: first_name,
@@ -143,7 +148,7 @@ authRouter.post('/register', async (req, res, next) => {
       userDescription: user_description,
       topMusicGenres: genres, // Save as array
       trialEndsAt,
-      trialActive: true,
+      trialActive,
     });
 
     if (appliedInvite) {
