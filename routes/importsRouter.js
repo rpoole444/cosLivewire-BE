@@ -148,6 +148,13 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         }
 
         const finalStartTime = event.start_time || (startAt ? startAt.format('HH:mm:ss') : null);
+        if (!finalStartTime) {
+          throw new Error(`Missing start_time for import_event ${event.id}`);
+        }
+
+        // Default end_time to enforce completeness at promotion time.
+        const finalEndTime = event.end_time
+          || dayjs(`2000-01-01 ${finalStartTime}`).add(2, 'hour').format('HH:mm:ss');
 
         const normalizedPoster = event.poster && String(event.poster).trim();
         const poster = normalizedPoster
@@ -171,7 +178,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             website: event.website || null,
             poster,
             start_time: finalStartTime,
-            end_time: event.end_time || null,
+            end_time: finalEndTime,
           })
           .returning('id');
 
