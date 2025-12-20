@@ -1,8 +1,12 @@
 const crypto = require('crypto');
 const dayjs = require('dayjs');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
 
 dayjs.extend(customParseFormat);
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const DAY_HEADER_REGEX = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+([A-Za-z]+)\s+(\d{1,2})/i;
 const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.m\.|p\.m\.|am|pm)/gi;
@@ -116,11 +120,12 @@ const buildEvent = ({ venue, artistDisplay, time, date, rawBlock, warnings }) =>
     resolvedArtist = 'TBA';
   }
 
-  const startAt = date
-    .hour(time.hour)
-    .minute(time.minute)
-    .second(0)
-    .millisecond(0);
+  const localDateTime = dayjs.tz(
+    `${date.format('YYYY-MM-DD')} ${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`,
+    'YYYY-MM-DD HH:mm',
+    'America/Denver'
+  );
+  const startAt = localDateTime.utc();
 
   const fingerprint = buildFingerprint({
     venue,
