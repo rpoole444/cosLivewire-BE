@@ -10,6 +10,7 @@ const { createClient } = require('redis');
 const { RedisStore } = require('connect-redis');
 const bodyParser = require('body-parser');
 const initializePassport = require('./passport-config');
+const { requireAdmin } = require('./middleware/auth');
 const authRouter = require('./routes/authRouter');
 const eventRouter = require('./routes/eventRouter');
 const artistRouter = require('./routes/artistRouter');
@@ -82,6 +83,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/artists', artistRouter);
 app.use('/api/invites', inviteRouter);
 app.use('/api/payments', stripeRouter);
+app.use('/api/admin', requireAdmin);
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
 // Error handling middleware should be the last piece of middleware added to the app

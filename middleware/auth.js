@@ -14,4 +14,18 @@ function ensureAuth(req, res, next) {
   return res.status(401).json({ message: 'Unauthorized' });
 }
 
-module.exports = { ensureAuth };
+function requireAdmin(req, res, next) {
+  // Require an authenticated session before checking admin privileges.
+  if (!req.isAuthenticated || !req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  // Authenticated users without admin privileges are explicitly forbidden.
+  if (!req.user || req.user.is_admin !== true) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  return next();
+}
+
+module.exports = { ensureAuth, requireAdmin };
