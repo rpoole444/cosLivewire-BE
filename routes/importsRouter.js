@@ -1,5 +1,6 @@
 const express = require('express');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
+const { requireAdmin } = require('../middleware/auth');
 
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
@@ -96,6 +97,107 @@ const parseWarningsField = (value) => {
   }
   return [];
 };
+
+// Moderation endpoints for staged imports (no promotion to events here).
+importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, res) => {
+  try {
+    const { source } = req.params;
+    const eventId = Number(req.params.eventId);
+    if (!source || !Number.isInteger(eventId)) {
+      return res.status(400).json({ message: 'Invalid source or eventId' });
+    }
+
+    const updatedEvent = await knex.transaction(async (trx) => {
+      const event = await trx('import_events')
+        .where({ id: eventId, source })
+        .first();
+
+      if (!event) {
+        return null;
+      }
+
+      if (event.status !== 'pending') {
+        return { error: 'Event is not pending' };
+      }
+
+      const rows = await trx('import_events')
+        .where({ id: eventId })
+        .update({
+          status: 'accepted',
+          accepted_by: req.user?.id || null,
+          accepted_at: knex.fn.now(),
+        })
+        .returning('*');
+
+      return rows[0];
+    });
+
+    if (!updatedEvent) {
+      return res.status(404).json({ message: 'Import event not found' });
+    }
+    if (updatedEvent.error) {
+      return res.status(400).json({ message: updatedEvent.error });
+    }
+
+    return res.json({
+      ...updatedEvent,
+      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
+    });
+  } catch (error) {
+    console.error('Error accepting import event:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
+importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, res) => {
+  try {
+    const { source } = req.params;
+    const eventId = Number(req.params.eventId);
+    if (!source || !Number.isInteger(eventId)) {
+      return res.status(400).json({ message: 'Invalid source or eventId' });
+    }
+
+    const updatedEvent = await knex.transaction(async (trx) => {
+      const event = await trx('import_events')
+        .where({ id: eventId, source })
+        .first();
+
+      if (!event) {
+        return null;
+      }
+
+      if (event.status !== 'pending') {
+        return { error: 'Event is not pending' };
+      }
+
+      const rows = await trx('import_events')
+        .where({ id: eventId })
+        .update({
+          status: 'rejected',
+          rejected_by: req.user?.id || null,
+          rejected_at: knex.fn.now(),
+        })
+        .returning('*');
+
+      return rows[0];
+    });
+
+    if (!updatedEvent) {
+      return res.status(404).json({ message: 'Import event not found' });
+    }
+    if (updatedEvent.error) {
+      return res.status(400).json({ message: updatedEvent.error });
+    }
+
+    return res.json({
+      ...updatedEvent,
+      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
+    });
+  } catch (error) {
+    console.error('Error rejecting import event:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
 
 importsRouter.get('/moondog/:batchId', async (req, res) => {
   try {
