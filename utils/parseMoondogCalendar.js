@@ -5,7 +5,7 @@ const customParseFormat = require('dayjs/plugin/customParseFormat');
 dayjs.extend(customParseFormat);
 
 const DAY_HEADER_REGEX = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+([A-Za-z]+)\s+(\d{1,2})/i;
-const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.m\.|p\.m\.|am|pm)\b/gi;
+const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.m\.|p\.m\.|am|pm)/gi;
 const DEBUG_PARSER = process.env.DEBUG_PARSER === 'true';
 
 const debugLog = (message) => {
@@ -38,15 +38,13 @@ const parseDayHeader = (line, referenceYear) => {
   const baseYear = referenceYear || new Date().getFullYear();
 
   const formats = [
-    'dddd, MMM D YYYY',
-    'dddd, MMMM D YYYY',
-    'ddd, MMM D YYYY',
-    'ddd, MMMM D YYYY',
+    'MMM D YYYY',
+    'MMMM D YYYY',
   ];
 
   let parsed = null;
   for (const format of formats) {
-    const candidate = dayjs(`${match[1]}, ${monthText} ${dayText} ${baseYear}`, format, true);
+    const candidate = dayjs(`${monthText} ${dayText} ${baseYear}`, format, true);
     if (candidate.isValid()) {
       parsed = candidate;
       break;
