@@ -152,10 +152,92 @@ const parseVenueLine = (line, date) => {
 
   const venue = segments.shift();
   const events = [];
-  let pendingArtist = null;
   const pendingArtists = [];
+  const pendingTimes = [];
+
+  const hasArtistToken = segments.some((segment) => {
+    const artistPart = segment
+      .replace(TIME_REGEX, '')
+      .replace(/[&]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return artistPart && normalizeText(artistPart) !== 'tba';
+  });
+
+  if (!hasArtistToken) {
+    const warnings = ['artist_missing'];
+    if (lineTimes.length > 1) warnings.push('multiple_times');
+    events.push(buildEvent({
+      venue,
+      artistDisplay: '',
+      time: lineTimes[0],
+      date,
+      rawBlock: line,
+      warnings,
+    }));
+    debugLog(`[parser] venue="${venue}"`);
+    debugLog(`[parser] pairs=${JSON.stringify([{ artist: 'TBA', time: lineTimes[0] }])}`);
+    debugLog(`[parser] events_created=${events.length}`);
+    return events;
+  }
 
   // Sequential parsing: build events only when an artist-time pair completes.
+  const flushPending = () => {
+    if (pendingTimes.length === 0) return;
+
+    if (pendingArtists.length === 0) {
+      const warnings = ['artist_missing'];
+      if (pendingTimes.length > 1) warnings.push('multiple_times');
+      events.push(buildEvent({
+        venue,
+        artistDisplay: '',
+        time: pendingTimes[0],
+        date,
+        rawBlock: line,
+        warnings,
+      }));
+      return;
+    }
+
+    if (pendingArtists.length === 1) {
+      const warnings = [];
+      if (pendingTimes.length > 1) warnings.push('multiple_times');
+      events.push(buildEvent({
+        venue,
+        artistDisplay: pendingArtists[0],
+        time: pendingTimes[0],
+        date,
+        rawBlock: line,
+        warnings,
+      }));
+      return;
+    }
+
+    if (pendingTimes.length === 1) {
+      events.push(buildEvent({
+        venue,
+        artistDisplay: pendingArtists.join(', '),
+        time: pendingTimes[0],
+        date,
+        rawBlock: line,
+        warnings: ['multiple_artists'],
+      }));
+      return;
+    }
+
+    const pairCount = Math.min(pendingArtists.length, pendingTimes.length);
+    for (let i = 0; i < pairCount; i += 1) {
+      events.push(buildEvent({
+        venue,
+        artistDisplay: pendingArtists[i],
+        time: pendingTimes[i],
+        date,
+        rawBlock: line,
+        warnings: ['multiple_artists'],
+      }));
+    }
+  };
+
   segments.forEach((segment) => {
     const segmentTimes = extractTimes(segment);
     const normalized = segment
@@ -164,53 +246,41 @@ const parseVenueLine = (line, date) => {
       .replace(/\s+/g, ' ')
       .trim();
     const isTba = normalized && normalizeText(normalized) === 'tba';
+    const hasArtist = normalized && !isTba;
 
     if (segmentTimes.length === 0) {
-      if (normalized && !isTba) {
+      if (hasArtist) {
+        if (pendingTimes.length > 0) {
+          flushPending();
+          pendingTimes.length = 0;
+          pendingArtists.length = 0;
+        }
         pendingArtists.push(normalized);
-        pendingArtist = normalized;
       }
       return;
     }
 
-    const warnings = [];
-    const time = segmentTimes[0];
-    if (segmentTimes.length > 1) {
-      warnings.push('multiple_times');
+    if (hasArtist) {
+      if (pendingTimes.length > 0) {
+        flushPending();
+        pendingTimes.length = 0;
+        pendingArtists.length = 0;
+      }
+      pendingArtists.push(normalized);
     }
 
-    if (pendingArtists.length === 0) {
-      warnings.push('artist_missing');
-      events.push(buildEvent({
-        venue,
-        artistDisplay: '',
-        time,
-        date,
-        rawBlock: line,
-        warnings,
-      }));
-      pendingArtist = null;
-      return;
-    }
-
-    if (pendingArtists.length > 1) {
-      warnings.push('multiple_artists');
-    }
-
-    events.push(buildEvent({
-      venue,
-      artistDisplay: pendingArtists.join(', '),
-      time,
-      date,
-      rawBlock: line,
-      warnings,
-    }));
-
-    pendingArtists.length = 0;
-    pendingArtist = null;
+    pendingTimes.push(...segmentTimes);
   });
 
+  flushPending();
+
   debugLog(`[parser] venue="${venue}"`);
+  debugLog(`[parser] pairs=${JSON.stringify(
+    events.map((event) => ({
+      artist: event.artist_display,
+      time: `${event.start_at.getHours()}:${String(event.start_at.getMinutes()).padStart(2, '0')}`,
+    }))
+  )}`);
   debugLog(`[parser] events_created=${events.length}`);
   return events;
 };
