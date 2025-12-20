@@ -30,9 +30,12 @@ importsRouter.post('/moondog', async (req, res) => {
       return res.status(400).json({ message: 'raw_text is required' });
     }
 
-    const promoterId = Number(process.env.MOONDOG_PROMOTER_ID);
-    if (!Number.isInteger(promoterId)) {
-      return res.status(500).json({ message: 'MOONDOG_PROMOTER_ID is not configured' });
+    const promoterEnv = process.env.MOONDOG_PROMOTER_ID;
+    const promoterId = promoterEnv && Number.isInteger(Number(promoterEnv))
+      ? Number(promoterEnv)
+      : null;
+    if (!promoterId) {
+      console.warn('promoter_unassigned');
     }
 
     const parsedEvents = parseMoondogCalendar(raw_text);
