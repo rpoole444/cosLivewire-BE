@@ -140,14 +140,13 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
       };
 
       for (const event of acceptedEvents) {
-        // Derive date/time from start_at to guarantee NOT NULL events.date.
-        const startAt = event.start_at ? dayjs(event.start_at) : null;
-        const finalDate = event.date || (startAt ? startAt.format('YYYY-MM-DD') : null);
+        // Use literal local date/time from the import record; no timezone conversion here.
+        const finalDate = event.date || null;
         if (!finalDate) {
           throw new Error(`Missing date for import_event ${event.id}`);
         }
 
-        const finalStartTime = event.start_time || (startAt ? startAt.format('HH:mm:ss') : null);
+        const finalStartTime = event.start_time || null;
         if (!finalStartTime) {
           throw new Error(`Missing start_time for import_event ${event.id}`);
         }
@@ -155,6 +154,10 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         // Default end_time to enforce completeness at promotion time.
         const finalEndTime = event.end_time
           || dayjs(`2000-01-01 ${finalStartTime}`).add(2, 'hour').format('HH:mm:ss');
+
+        console.log(
+          `Promoting import_event ${event.id}: date=${finalDate} start_time=${finalStartTime} end_time=${finalEndTime}`
+        );
 
         const normalizedPoster = event.poster && String(event.poster).trim();
         const poster = normalizedPoster
