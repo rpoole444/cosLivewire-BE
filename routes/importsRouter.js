@@ -83,25 +83,44 @@ importsRouter.post('/moondog', async (req, res) => {
   }
 });
 
-importsRouter.get('/:batchId', async (req, res) => {
+const parseWarningsField = (value) => {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+  return [];
+};
+
+importsRouter.get('/moondog/:batchId', async (req, res) => {
   try {
     const batchId = Number(req.params.batchId);
     if (!Number.isInteger(batchId)) {
       return res.status(400).json({ message: 'batchId must be an integer' });
     }
 
-    const batch = await knex('import_batches').where({ id: batchId }).first();
+    const batch = await knex('import_batches')
+      .where({ id: batchId, source: 'moondog' })
+      .first();
     if (!batch) {
       return res.status(404).json({ message: 'Import batch not found' });
     }
 
     const events = await knex('import_events')
-      .where({ batch_id: batchId })
+      .where({ batch_id: batchId, source: 'moondog' })
       .orderBy('id');
 
     return res.json({
       batch,
-      events,
+      events: events.map((event) => ({
+        ...event,
+        parse_warnings: parseWarningsField(event.parse_warnings),
+      })),
     });
   } catch (error) {
     console.error('Error loading import batch:', error);
