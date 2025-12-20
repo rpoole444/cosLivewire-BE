@@ -1,5 +1,4 @@
 const express = require('express');
-const dayjs = require('dayjs');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 
@@ -139,6 +138,28 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         moondog: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
       };
 
+      const normalizeTimeParts = (value) => {
+        const parts = String(value).trim().split(':').map((part) => part.padStart(2, '0'));
+        const hours = parseInt(parts[0], 10);
+        const minutes = parseInt(parts[1] || '00', 10);
+        const seconds = parseInt(parts[2] || '00', 10);
+        return { hours, minutes, seconds };
+      };
+
+      const addTwoHours = (timeValue) => {
+        const { hours, minutes, seconds } = normalizeTimeParts(timeValue);
+        const totalSeconds = (hours * 3600) + (minutes * 60) + seconds + (2 * 3600);
+        const wrappedSeconds = totalSeconds % 86400;
+        const finalHours = Math.floor(wrappedSeconds / 3600);
+        const finalMinutes = Math.floor((wrappedSeconds % 3600) / 60);
+        const finalSeconds = wrappedSeconds % 60;
+        return [
+          String(finalHours).padStart(2, '0'),
+          String(finalMinutes).padStart(2, '0'),
+          String(finalSeconds).padStart(2, '0'),
+        ].join(':');
+      };
+
       for (const event of acceptedEvents) {
         // Use literal local date/time from the import record; no timezone conversion here.
         const finalDate = event.date || null;
@@ -152,11 +173,10 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         }
 
         // Default end_time to enforce completeness at promotion time.
-        const finalEndTime = event.end_time
-          || dayjs(`2000-01-01 ${finalStartTime}`).add(2, 'hour').format('HH:mm:ss');
+        const finalEndTime = event.end_time || addTwoHours(finalStartTime);
 
         console.log(
-          `Promoting import_event ${event.id}: date=${finalDate} start_time=${finalStartTime} end_time=${finalEndTime}`
+          `[IMPORT PROMOTE] "${event.title || event.artist_display || 'Untitled Event'}" date=${finalDate} start_time=${finalStartTime}`
         );
 
         const normalizedPoster = event.poster && String(event.poster).trim();
