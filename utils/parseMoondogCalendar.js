@@ -154,110 +154,65 @@ const parseVenueLine = (line, date) => {
 
   const venue = segments.shift();
   const events = [];
+  let pendingArtist = null;
   const pendingArtists = [];
-  const pairs = [];
 
+  // Sequential parsing: build events only when an artist-time pair completes.
   segments.forEach((segment) => {
     const segmentTimes = extractTimes(segment);
-    const artistPart = segment
+    const normalized = segment
       .replace(TIME_REGEX, '')
       .replace(/[&]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const artistIsTba = artistPart && normalizeText(artistPart) === 'tba';
-    const hasArtist = artistPart && !artistIsTba;
+    const isTba = normalized && normalizeText(normalized) === 'tba';
 
     if (segmentTimes.length === 0) {
-      if (hasArtist) {
-        pendingArtists.push(artistPart);
+      if (normalized && !isTba) {
+        pendingArtists.push(normalized);
+        pendingArtist = normalized;
       }
       return;
     }
 
-    if (hasArtist) {
-      pendingArtists.push(artistPart);
+    const warnings = [];
+    const time = segmentTimes[0];
+    if (segmentTimes.length > 1) {
+      warnings.push('multiple_times');
     }
 
-    pairs.push({
-      artists: pendingArtists.length ? [...pendingArtists] : [],
-      times: segmentTimes,
-    });
-
-    pendingArtists.length = 0;
-  });
-
-  const pairLog = pairs.map((pair) => ({
-    artists: pair.artists,
-    times: pair.times.map((time) => `${time.hour}:${String(time.minute).padStart(2, '0')}`),
-  }));
-  debugLog(`[parser] venue="${venue}"`);
-  debugLog(`[parser] pairs=${JSON.stringify(pairLog)}`);
-
-  pairs.forEach((pair) => {
-    const artists = pair.artists;
-    const times = pair.times;
-
-    if (artists.length === 0) {
+    if (pendingArtists.length === 0) {
+      warnings.push('artist_missing');
       events.push(buildEvent({
         venue,
         artistDisplay: '',
-        time: times[0],
+        time,
         date,
         rawBlock: line,
-        warnings: ['artist_missing'],
+        warnings,
       }));
+      pendingArtist = null;
       return;
     }
 
-    if (artists.length === 1 && times.length > 1) {
-      events.push(buildEvent({
-        venue,
-        artistDisplay: artists[0],
-        time: times[0],
-        date,
-        rawBlock: line,
-        warnings: ['multiple_times'],
-      }));
-      return;
-    }
-
-    if (artists.length > 1 && times.length === 1) {
-      events.push(buildEvent({
-        venue,
-        artistDisplay: artists.join(', '),
-        time: times[0],
-        date,
-        rawBlock: line,
-        warnings: ['multiple_artists'],
-      }));
-      return;
-    }
-
-    if (artists.length > 1 && times.length > 1) {
-      const pairCount = Math.min(artists.length, times.length);
-      for (let i = 0; i < pairCount; i += 1) {
-        events.push(buildEvent({
-          venue,
-          artistDisplay: artists[i],
-          time: times[i],
-          date,
-          rawBlock: line,
-          warnings: ['multiple_artists'],
-        }));
-      }
-      return;
+    if (pendingArtists.length > 1) {
+      warnings.push('multiple_artists');
     }
 
     events.push(buildEvent({
       venue,
-      artistDisplay: artists[0],
-      time: times[0],
+      artistDisplay: pendingArtists.join(', '),
+      time,
       date,
       rawBlock: line,
-      warnings: [],
+      warnings,
     }));
+
+    pendingArtists.length = 0;
+    pendingArtist = null;
   });
 
+  debugLog(`[parser] venue="${venue}"`);
   debugLog(`[parser] events_created=${events.length}`);
   return events;
 };
