@@ -16,6 +16,7 @@ const eventRouter = require('./routes/eventRouter');
 const artistRouter = require('./routes/artistRouter');
 const inviteRouter = require('./routes/inviteRouter');
 const { router: stripeRouter, webhookRouter } = require('./routes/stripe');
+const importsRouter = require('./routes/importsRouter');
 
 const { findUserByEmail, findUserById } = require('./models/User');
 
@@ -84,6 +85,7 @@ app.use('/api/artists', artistRouter);
 app.use('/api/invites', inviteRouter);
 app.use('/api/payments', stripeRouter);
 app.use('/api/admin', requireAdmin);
+app.use('/api/admin/imports', importsRouter);
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
 // Error handling middleware should be the last piece of middleware added to the app
