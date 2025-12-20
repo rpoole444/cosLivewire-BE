@@ -1,4 +1,5 @@
 const express = require('express');
+const dayjs = require('dayjs');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 
@@ -139,6 +140,15 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
       };
 
       for (const event of acceptedEvents) {
+        // Derive date/time from start_at to guarantee NOT NULL events.date.
+        const startAt = event.start_at ? dayjs(event.start_at) : null;
+        const finalDate = event.date || (startAt ? startAt.format('YYYY-MM-DD') : null);
+        if (!finalDate) {
+          throw new Error(`Missing date for import_event ${event.id}`);
+        }
+
+        const finalStartTime = event.start_time || (startAt ? startAt.format('HH:mm:ss') : null);
+
         const normalizedPoster = event.poster && String(event.poster).trim();
         const poster = normalizedPoster
           ? normalizedPoster
@@ -151,7 +161,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             description: event.description || '',
             location: event.location || event.venue_name || '',
             address: event.address || '',
-            date: event.date || null,
+            date: finalDate,
             genre: event.genre || null,
             ticket_price: null,
             age_restriction: null,
@@ -160,7 +170,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             venue_name: event.venue_name || null,
             website: event.website || null,
             poster,
-            start_time: event.start_time || null,
+            start_time: finalStartTime,
             end_time: event.end_time || null,
           })
           .returning('id');
