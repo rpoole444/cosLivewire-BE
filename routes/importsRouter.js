@@ -98,6 +98,98 @@ const parseWarningsField = (value) => {
   return [];
 };
 
+// Promote accepted import events into public events (all-or-nothing).
+importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) => {
+  try {
+    const { source } = req.params;
+    const batchId = Number(req.params.batchId);
+    if (!source || !Number.isInteger(batchId)) {
+      return res.status(400).json({ message: 'Invalid source or batchId' });
+    }
+
+    const summary = await knex.transaction(async (trx) => {
+      const batch = await trx('import_batches')
+        .where({ id: batchId, source })
+        .first();
+      if (!batch) return { error: 'batch_not_found' };
+      if (batch.status === 'completed') return { error: 'batch_already_completed' };
+
+      const acceptedEvents = await trx('import_events')
+        .where({
+          batch_id: batchId,
+          source,
+          status: 'accepted',
+        })
+        .whereNull('promoted_event_id')
+        .orderBy('id');
+
+      const totalEvents = await trx('import_events')
+        .where({ batch_id: batchId, source })
+        .count('* as count')
+        .first();
+      const totalCount = Number(totalEvents?.count || 0);
+
+      if (!acceptedEvents.length) {
+        return { promoted_count: 0, skipped_count: totalCount, batch_id: batchId };
+      }
+
+      for (const event of acceptedEvents) {
+        const rows = await trx('events')
+          .insert({
+            user_id: event.user_id || batch.created_by_user_id || null,
+            title: event.title || event.artist_display || 'Untitled Event',
+            description: event.description || '',
+            location: event.location || event.venue_name || '',
+            address: event.address || '',
+            date: event.date || null,
+            genre: event.genre || null,
+            ticket_price: null,
+            age_restriction: null,
+            website_link: null,
+            is_approved: true,
+            venue_name: event.venue_name || null,
+            website: event.website || null,
+            poster: event.poster || null,
+            start_time: event.start_time || null,
+            end_time: event.end_time || null,
+          })
+          .returning('id');
+
+        const promotedEventId = Array.isArray(rows) ? rows[0]?.id || rows[0] : rows;
+
+        await trx('import_events')
+          .where({ id: event.id })
+          .update({ promoted_event_id: promotedEventId });
+      }
+
+      await trx('import_batches')
+        .where({ id: batchId })
+        .update({
+          status: 'completed',
+          completed_at: knex.fn.now(),
+        });
+
+      return {
+        promoted_count: acceptedEvents.length,
+        skipped_count: totalCount - acceptedEvents.length,
+        batch_id: batchId,
+      };
+    });
+
+    if (summary.error === 'batch_not_found') {
+      return res.status(404).json({ message: 'Import batch not found' });
+    }
+    if (summary.error === 'batch_already_completed') {
+      return res.status(400).json({ message: 'Import batch already completed' });
+    }
+
+    return res.json(summary);
+  } catch (error) {
+    console.error('Error promoting import batch:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 // Moderation endpoints for staged imports (no promotion to events here).
 importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, res) => {
   try {
