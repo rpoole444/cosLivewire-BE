@@ -130,7 +130,7 @@ const buildEvent = ({ venue, artistDisplay, time, date, rawBlock, warnings }) =>
   const fingerprint = buildFingerprint({
     venue,
     artist: resolvedArtist,
-    dateTime: startAt,
+    dateTime: dayjs(startAt).tz('America/Denver'),
   });
 
   return {

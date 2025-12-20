@@ -49,7 +49,7 @@ assert.ok(multiTimeEvent.parse_warnings.includes('multiple_times'));
 const fingerprint = buildFingerprint({
   venue: tokkiEvent.venue_name,
   artist: tokkiEvent.artist_display,
-  dateTime: dayjs(tokkiEvent.start_at),
+  dateTime: dayjs(tokkiEvent.start_at).tz('America/Denver'),
 });
 assert.strictEqual(tokkiEvent.fingerprint, fingerprint);
 
