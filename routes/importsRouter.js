@@ -133,7 +133,17 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         return { promoted_count: 0, skipped_count: totalCount, batch_id: batchId };
       }
 
+      const defaultPosters = {
+        // Apply defaults only during promotion, and only for trusted sources.
+        moondog: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
+      };
+
       for (const event of acceptedEvents) {
+        const normalizedPoster = event.poster && String(event.poster).trim();
+        const poster = normalizedPoster
+          ? normalizedPoster
+          : (defaultPosters[source] || null);
+
         const rows = await trx('events')
           .insert({
             user_id: event.user_id || batch.created_by_user_id || null,
@@ -149,7 +159,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             is_approved: true,
             venue_name: event.venue_name || null,
             website: event.website || null,
-            poster: event.poster || null,
+            poster,
             start_time: event.start_time || null,
             end_time: event.end_time || null,
           })
