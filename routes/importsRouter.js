@@ -61,7 +61,7 @@ importsRouter.post('/moondog', async (req, res) => {
         artist_display: event.artist_display,
         start_at: event.start_at,
         raw_block: event.raw_block,
-        parse_warnings: event.parse_warnings,
+        parse_warnings: JSON.stringify(event.parse_warnings || []),
         fingerprint: event.fingerprint,
       }));
 
