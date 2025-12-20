@@ -14,6 +14,14 @@ const normalizeText = (value) => {
     .toLowerCase();
 };
 
+const normalizeForFingerprint = (value) => {
+  return normalizeText(value)
+    .normalize('NFKD')
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "'")
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\p{Diacritic}/gu, '');
+};
+
 const parseDayHeader = (line, referenceYear) => {
   const match = line.match(DAY_HEADER_REGEX);
   if (!match) return null;
@@ -83,8 +91,8 @@ const roundToQuarterHour = (dateTime) => {
 const buildFingerprint = ({ venue, artist, dateTime }) => {
   const rounded = roundToQuarterHour(dateTime);
   const fingerprintSource = [
-    normalizeText(venue),
-    normalizeText(artist),
+    normalizeForFingerprint(venue),
+    normalizeForFingerprint(artist),
     rounded.format('YYYY-MM-DD'),
     rounded.format('HH:mm'),
   ].join('|');
@@ -92,18 +100,15 @@ const buildFingerprint = ({ venue, artist, dateTime }) => {
   return crypto.createHash('sha256').update(fingerprintSource).digest('hex');
 };
 
-const buildEvent = ({ venue, artistSegments, time, date, rawBlock }) => {
-  const warnings = [];
-  let artistDisplay = '';
+const buildEvent = ({ venue, artistDisplay, time, date, rawBlock, warnings }) => {
+  const resolvedWarnings = Array.isArray(warnings) ? [...warnings] : [];
+  let resolvedArtist = artistDisplay;
 
-  if (!artistSegments.length) {
-    warnings.push('artist_missing');
-    artistDisplay = 'TBA';
-  } else if (artistSegments.length > 1) {
-    warnings.push('multiple_artists');
-    artistDisplay = artistSegments.join(', ');
-  } else {
-    artistDisplay = artistSegments[0];
+  if (!resolvedArtist) {
+    if (!resolvedWarnings.includes('artist_missing')) {
+      resolvedWarnings.push('artist_missing');
+    }
+    resolvedArtist = 'TBA';
   }
 
   const startAt = date
@@ -114,21 +119,24 @@ const buildEvent = ({ venue, artistSegments, time, date, rawBlock }) => {
 
   const fingerprint = buildFingerprint({
     venue,
-    artist: artistDisplay,
+    artist: resolvedArtist,
     dateTime: startAt,
   });
 
   return {
     venue_name: venue,
-    artist_display: artistDisplay,
+    artist_display: resolvedArtist,
     start_at: startAt.toDate(),
     raw_block: rawBlock,
-    parse_warnings: warnings.length ? warnings : null,
+    parse_warnings: resolvedWarnings,
     fingerprint,
   };
 };
 
 const parseVenueLine = (line, date) => {
+  if (!line.includes(',') || !TIME_REGEX.test(line)) return [];
+  TIME_REGEX.lastIndex = 0;
+
   const segments = line.split(',').map((segment) => segment.trim()).filter(Boolean);
   if (!segments.length) return [];
 
@@ -143,20 +151,65 @@ const parseVenueLine = (line, date) => {
       return;
     }
 
-    const event = buildEvent({
-      venue,
-      artistSegments,
-      time: times[0],
-      date,
-      rawBlock: line,
-    });
+    const warnings = [];
+    if (times.length > 1) warnings.push('multiple_times');
 
-    if (times.length > 1) {
-      event.parse_warnings = event.parse_warnings || [];
-      event.parse_warnings.push('multiple_times');
+    if (!artistSegments.length) {
+      times.forEach((time) => {
+        events.push(buildEvent({
+          venue,
+          artistDisplay: '',
+          time,
+          date,
+          rawBlock: line,
+          warnings,
+        }));
+      });
+      artistSegments = [];
+      return;
     }
 
-    events.push(event);
+    if (times.length === 1 && artistSegments.length > 1) {
+      warnings.push('multiple_artists');
+      events.push(buildEvent({
+        venue,
+        artistDisplay: artistSegments.join(', '),
+        time: times[0],
+        date,
+        rawBlock: line,
+        warnings,
+      }));
+      artistSegments = [];
+      return;
+    }
+
+    if (times.length > 1 && artistSegments.length > 1) {
+      warnings.push('multiple_artists');
+      times.forEach((time, index) => {
+        const artistDisplay = artistSegments[index] || artistSegments[artistSegments.length - 1];
+        events.push(buildEvent({
+          venue,
+          artistDisplay,
+          time,
+          date,
+          rawBlock: line,
+          warnings: [...warnings],
+        }));
+      });
+      artistSegments = [];
+      return;
+    }
+
+    times.forEach((time) => {
+      events.push(buildEvent({
+        venue,
+        artistDisplay: artistSegments[0],
+        time,
+        date,
+        rawBlock: line,
+        warnings,
+      }));
+    });
     artistSegments = [];
   });
 
