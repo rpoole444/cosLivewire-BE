@@ -19,8 +19,8 @@ const Artist = {
     return !!existing;
   },
 
-  findAllPublic: async () => {
-    return knex('artists as a')
+  findAllPublic: async ({ includeUnlisted = false } = {}) => {
+    const query = knex('artists as a')
       .select(
         'a.id',
         'a.display_name',
@@ -39,8 +39,14 @@ const Artist = {
       )
       .leftJoin('users as u', 'a.user_id', 'u.id')
       .whereNull('a.deleted_at')
-      .andWhere({ 'a.is_approved': true, 'a.is_listed': true })
+      .andWhere({ 'a.is_approved': true })
       .orderBy('a.display_name');
+
+    if (!includeUnlisted) {
+      query.andWhere({ 'a.is_listed': true });
+    }
+
+    return query;
   },
 
   findBySlugWithEvents: async (slug) => {

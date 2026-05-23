@@ -10,6 +10,7 @@ const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const slugify = require("../utils/slugify")
 const generateUniqueSlug = require('../utils/generateUniqueSlug');
 const isAdmin = require('../utils/isAdmin');
+const { hasProAccess } = require('../utils/access');
 
 const {
   deleteEvent,
@@ -132,8 +133,9 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
-  if (!req.user.is_pro) {
-    return res.status(403).json({ message: 'Pro membership required for multiple event submission.' });
+  const canSubmitMultiple = await hasProAccess(req.user.id);
+  if (!canSubmitMultiple) {
+    return res.status(403).json({ message: 'Artist profile access required for multiple event submission.' });
   }
 
   try {

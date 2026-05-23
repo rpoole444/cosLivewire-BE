@@ -4,12 +4,20 @@ const knex = require('../db/knex');
 const ACCESS_STATES = {
   PRO: 'pro',
   TRIAL: 'trial',
+  COMMUNITY: 'community',
   GATED: 'gated',
   NONE: 'none',
 };
 
+const COMMUNITY_ARTIST_ACCESS_END_DATE = '2026-12-31';
+const COMMUNITY_ARTIST_ACCESS_END_UTC = Date.UTC(2027, 0, 1);
+
 function trialIsActive(trial_ends_at, now = new Date()) {
   return !!trial_ends_at && new Date(trial_ends_at) > now;
+}
+
+function communityArtistAccessIsActive(now = new Date()) {
+  return now.getTime() < COMMUNITY_ARTIST_ACCESS_END_UTC;
 }
 
 function getArtistAccessState(userLike, now = new Date()) {
@@ -20,6 +28,7 @@ function getArtistAccessState(userLike, now = new Date()) {
 
   if (is_pro) return ACCESS_STATES.PRO;
   if (trialActive) return ACCESS_STATES.TRIAL;
+  if (communityArtistAccessIsActive(now)) return ACCESS_STATES.COMMUNITY;
 
   const hadAccessBefore = !!pro_cancelled_at || !!trial_ends_at || !!stripe_customer_id;
   if (hadAccessBefore) {
@@ -30,6 +39,8 @@ function getArtistAccessState(userLike, now = new Date()) {
 }
 
 async function hasProAccess(userId) {
+  if (communityArtistAccessIsActive()) return true;
+
   const user = await knex('users')
     .first('is_pro', 'trial_ends_at')
     .where({ id: userId });
@@ -54,6 +65,7 @@ async function recalcListingForUser(userId) {
   const proActive =
     !!user.is_pro &&
     (!user.pro_cancelled_at || new Date(user.pro_cancelled_at) > now);
+  const communityAccessActive = communityArtistAccessIsActive(now);
 
   const ts = new Date();
 
@@ -61,7 +73,7 @@ async function recalcListingForUser(userId) {
     is_pro: proActive,
     updated_at: ts,
   };
-  if (proActive) {
+  if (proActive || communityAccessActive) {
     artistUpdates.trial_active = false;
   }
 
@@ -92,7 +104,9 @@ async function recalcListingForUser(userId) {
 
 
 module.exports = {
+  COMMUNITY_ARTIST_ACCESS_END_DATE,
   hasProAccess,
+  communityArtistAccessIsActive,
   recalcListingForUser,
   trialIsActive,
   getArtistAccessState,

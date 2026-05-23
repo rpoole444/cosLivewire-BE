@@ -10,11 +10,15 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
 const { ensureAuth } = require('../middleware/auth')
-const isInTrial = require('../utils/isInTrial');
 const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
 const Artist = require('../models/Artist');
-const { recalcListingForUser, getArtistAccessState } = require('../utils/access');
+const {
+  recalcListingForUser,
+  getArtistAccessState,
+  hasProAccess,
+  communityArtistAccessIsActive,
+} = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 
 const MAX_EMBED_URL_LENGTH = 2000;
@@ -37,7 +41,9 @@ const upload = multer({
 // GET all public artist profiles
 artistRouter.get('/public-list', async (req, res) => {
   try {
-    const artists = await Artist.findAllPublic();
+    const artists = await Artist.findAllPublic({
+      includeUnlisted: communityArtistAccessIsActive(),
+    });
     const shaped = artists.map((artist) => {
       const access_state = getArtistAccessState({
         is_pro: artist.user_is_pro,
@@ -423,8 +429,9 @@ artistRouter.put('/:slug', upload.fields([
     return res.status(403).json({ message: 'Not authorized' });
   }
 
-  if (!isInTrial(req.user.trial_ends_at, req.user.is_pro)) {
-    return res.status(403).json({ message: 'Trial expired. Upgrade to edit your profile.' });
+  const access = await hasProAccess(artist.user_id);
+  if (!access) {
+    return res.status(403).json({ message: 'Artist profile access required to edit this profile.' });
   }
 
   try {
@@ -596,15 +603,13 @@ artistRouter.put('/:id/approve', async (req, res) => {
     const artist = await knex('artists').where({ id }).first();
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
 
-    // compute access
-    const { hasProAccess } = require('../utils/access');
     const access = await hasProAccess(artist.user_id);
 
     const [updated] = await knex('artists')
       .where({ id })
       .update({
         is_approved: true,
-        is_listed: access,              // ← auto-list if Pro or trial
+        is_listed: access,
         updated_at: new Date(),
       })
       .returning('*');
@@ -672,9 +677,8 @@ artistRouter.put('/:id/publish', ensureAuth, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const { hasProAccess } = require('../utils/access');
     const access = await hasProAccess(artist.user_id);
-    if (!access) return res.status(402).json({ message: 'Payment required' });
+    if (!access) return res.status(402).json({ message: 'Artist profile access required' });
 
     const [updated] = await knex('artists')
       .where({ id })
