@@ -24,9 +24,14 @@ const app = express();
 app.set('trust proxy', 1);
 
 const allowedOrigins = [
+  'http://localhost:3000', // Local development
   'http://localhost:3001', // Local development
   'https://app.alpinegrooveguide.com'// Vercel deployment
 ];
+
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is required in production');
+}
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -59,7 +64,7 @@ redisClient.connect().catch(console.error);
 // Session setup
 app.use(session({
   store: new RedisStore({ client: redisClient }),
-  secret: process.env.SESSION_SECRET|| 'keyboard cat',
+  secret: process.env.SESSION_SECRET || 'dev-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {

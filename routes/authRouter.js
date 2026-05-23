@@ -174,7 +174,6 @@ authRouter.put('/update-profile', upload.single('profile_picture'), async (req, 
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
-console.log("File Data-UPDATEPROFILEPIC : ", req.file);
 
   const userId = req.user.id;
   const { first_name, last_name, email, user_description, top_music_genres, displayName } = req.body;
@@ -217,7 +216,6 @@ authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req
 });
 
 authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
-  console.log('Fetching profile picture for user:', req.user);
   const userId = req.user.id;
 
   try {
@@ -309,7 +307,6 @@ authRouter.post('/start-trial', async (req, res) => {
 
 // Login user
 authRouter.post('/login', (req, res, next) => {
-  console.log('Login attempt:', req.body);
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
       console.error('Passport error:', err);
@@ -335,7 +332,6 @@ authRouter.post('/login', (req, res, next) => {
         // Optionally, if you want to ensure it's reflected in the database:
         // await updateUserAdminStatus(user.id, true);
       }
-      console.log('User logged in:', user);
       try {
         await updateUserLoginStatus(user.id, true);
         res.json({

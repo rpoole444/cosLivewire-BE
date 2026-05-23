@@ -312,7 +312,6 @@ router.post('/create-tip-session', async (req, res) => {
 
 // Create a subscription checkout session
 router.post('/create-checkout-session', async (req, res) => {
-  console.log('BODY RECEIVED:', req.body);
   const { userId, plan } = req.body;
 
   if (!userId || !plan) {

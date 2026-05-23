@@ -1,14 +1,22 @@
 // middleware/auth.js
-function ensureAuth(req, res, next) {
+const { findUserById } = require('../models/User');
+
+async function ensureAuth(req, res, next) {
   // Passport sessions set req.isAuthenticated()
   if (req.isAuthenticated && req.isAuthenticated()) return next();
 
   // Fallback: sometimes only the session id is present
   const sessionUserId = req.session?.passport?.user;
   if (sessionUserId) {
-    // mimic Passport deserialize result enough for this route
-    req.user = req.user || { id: sessionUserId };
-    return next();
+    try {
+      const user = await findUserById(sessionUserId);
+      if (user) {
+        req.user = user;
+        return next();
+      }
+    } catch (err) {
+      console.error('[ensureAuth] failed to hydrate session user', err);
+    }
   }
 
   return res.status(401).json({ message: 'Unauthorized' });
