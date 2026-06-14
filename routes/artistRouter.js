@@ -200,6 +200,27 @@ artistRouter.post('/trial/start', ensureAuth, async (req, res) => {
   }
 });
 
+// Public, minimal event feed for artist schedule embeds.
+artistRouter.get('/:slug/schedule', async (req, res) => {
+  try {
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 12)
+      : 5;
+    const schedule = await Artist.findPublicScheduleBySlug(req.params.slug, limit);
+
+    if (!schedule) {
+      return res.status(404).json({ message: 'Artist schedule not found' });
+    }
+
+    res.set('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=600');
+    return res.json(schedule);
+  } catch (err) {
+    console.error('Error fetching public artist schedule:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {

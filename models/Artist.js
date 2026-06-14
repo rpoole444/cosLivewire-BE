@@ -2,6 +2,12 @@ const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
 const isInTrial = require('../utils/isInTrial');
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const Artist = {
   findBySlug: async (slug) => {
@@ -78,6 +84,40 @@ const Artist = {
       ...artist,
       events,
       trial_expired: isTrialExpired,
+    };
+  },
+
+  findPublicScheduleBySlug: async (slug, limit = 5) => {
+    const artist = await knex('artists')
+      .select('id', 'user_id', 'display_name', 'slug')
+      .where({ slug, is_approved: true })
+      .whereNull('deleted_at')
+      .first();
+
+    if (!artist) return null;
+
+    const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
+    const upcomingEvents = await knex('events')
+      .select(
+        'id',
+        'title',
+        'date',
+        'start_time',
+        'venue_name',
+        'location',
+        'slug'
+      )
+      .where({ user_id: artist.user_id, is_approved: true })
+      .andWhere('date', '>=', today)
+      .orderBy('date')
+      .orderBy('start_time')
+      .limit(limit);
+
+    return {
+      id: artist.id,
+      display_name: artist.display_name,
+      slug: artist.slug,
+      events: upcomingEvents,
     };
   },
 
