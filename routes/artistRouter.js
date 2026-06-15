@@ -23,6 +23,18 @@ const { computeProActive } = require('../utils/proState');
 
 const MAX_EMBED_URL_LENGTH = 2000;
 const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
+const PROFILE_TYPES = new Set(['artist', 'venue', 'promoter']);
+
+const normalizeProfileType = (value) =>
+  PROFILE_TYPES.has(String(value || '').toLowerCase())
+    ? String(value).toLowerCase()
+    : 'artist';
+
+const parseOptionalCapacity = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
 const s3 = new S3Client({
   credentials: fromEnv(),
@@ -59,6 +71,9 @@ artistRouter.get('/public-list', async (req, res) => {
         profile_image: artist.profile_image,
         genres: artist.genres,
         bio: artist.bio,
+        profile_type: artist.profile_type || 'artist',
+        venue_city: artist.venue_city,
+        venue_state: artist.venue_state,
         is_pro: artist.user_is_pro,
         trial_ends_at: artist.user_trial_ends_at,
         pro_cancelled_at: artist.user_pro_cancelled_at,
@@ -285,10 +300,12 @@ artistRouter.post(
     const {
       display_name, bio, contact_email, genres, slug: customSlug,
       embed_youtube, embed_soundcloud, embed_bandcamp, tip_jar_url,
-      website
+      website, profile_type, venue_address, venue_city, venue_state,
+      venue_postal_code, venue_phone, booking_email, venue_capacity, age_policy
     } = req.body;
 
     const user_id = req.user?.id;
+    const normalizedProfileType = normalizeProfileType(profile_type);
     const slug = (customSlug || display_name || '')
       .toLowerCase()
       .trim()
@@ -302,6 +319,9 @@ artistRouter.post(
       }
       if (!files?.profile_image?.[0]) {
         return res.status(400).json({ message: 'Please upload a profile image.' });
+      }
+      if (normalizedProfileType === 'venue' && (!venue_address || !venue_city)) {
+        return res.status(400).json({ message: 'Venue address and city are required.' });
       }
 
     try {
@@ -329,6 +349,15 @@ artistRouter.post(
             embed_bandcamp,
             tip_jar_url,
             website,
+            profile_type: normalizedProfileType,
+            venue_address: normalizedProfileType === 'venue' ? venue_address : null,
+            venue_city: normalizedProfileType === 'venue' ? venue_city : null,
+            venue_state: normalizedProfileType === 'venue' ? venue_state : null,
+            venue_postal_code: normalizedProfileType === 'venue' ? venue_postal_code : null,
+            venue_phone: normalizedProfileType === 'venue' ? venue_phone : null,
+            booking_email: normalizedProfileType === 'venue' ? (booking_email || contact_email) : null,
+            venue_capacity: normalizedProfileType === 'venue' ? parseOptionalCapacity(venue_capacity) : null,
+            age_policy: normalizedProfileType === 'venue' ? age_policy : null,
             // Draft flags
             is_listed: false,
             is_approved: false,
@@ -370,6 +399,15 @@ artistRouter.post(
         embed_bandcamp,
         tip_jar_url,
         website,
+        profile_type: normalizedProfileType,
+        venue_address: normalizedProfileType === 'venue' ? venue_address : null,
+        venue_city: normalizedProfileType === 'venue' ? venue_city : null,
+        venue_state: normalizedProfileType === 'venue' ? venue_state : null,
+        venue_postal_code: normalizedProfileType === 'venue' ? venue_postal_code : null,
+        venue_phone: normalizedProfileType === 'venue' ? venue_phone : null,
+        booking_email: normalizedProfileType === 'venue' ? (booking_email || contact_email) : null,
+        venue_capacity: normalizedProfileType === 'venue' ? parseOptionalCapacity(venue_capacity) : null,
+        age_policy: normalizedProfileType === 'venue' ? age_policy : null,
         // Draft flags
         is_listed: false,
         is_approved: false,
@@ -466,6 +504,15 @@ artistRouter.put('/:slug', upload.fields([
       embed_soundcloud: req.body.embed_soundcloud,
       embed_bandcamp: req.body.embed_bandcamp,
       tip_jar_url: req.body.tip_jar_url,
+      profile_type: normalizeProfileType(req.body.profile_type || artist.profile_type),
+      venue_address: req.body.venue_address || null,
+      venue_city: req.body.venue_city || null,
+      venue_state: req.body.venue_state || null,
+      venue_postal_code: req.body.venue_postal_code || null,
+      venue_phone: req.body.venue_phone || null,
+      booking_email: req.body.booking_email || null,
+      venue_capacity: parseOptionalCapacity(req.body.venue_capacity),
+      age_policy: req.body.age_policy || null,
       genres: (() => {
         const raw = req.body.genres;
         if (Array.isArray(raw)) return raw;
@@ -479,6 +526,13 @@ artistRouter.put('/:slug', upload.fields([
         return [];
       })(),
     };
+
+    if (
+      updatedFields.profile_type === 'venue' &&
+      (!updatedFields.venue_address || !updatedFields.venue_city)
+    ) {
+      return res.status(400).json({ message: 'Venue address and city are required.' });
+    }
 
     const tooLongField = EMBED_FIELDS.find((field) => {
       const value = updatedFields[field];
@@ -494,8 +548,8 @@ artistRouter.put('/:slug', upload.fields([
     
     
     // Optional file updates
-    if (req.file) {
-      updatedFields.profile_image = req.file.location;
+    if (req.files?.profile_image?.[0]) {
+      updatedFields.profile_image = req.files.profile_image[0].location;
     }
     if (req.files?.promo_photo?.[0]) {
       updatedFields.promo_photo = req.files.promo_photo[0].location;

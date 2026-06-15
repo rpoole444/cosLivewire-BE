@@ -7,7 +7,8 @@
     "test": "node tests/stripeStatus.test.js",
     "check-pro-status": "node scripts/checkProStatus.js",
     "start": "node app.js",
-    "migrate": "knex migrate:latest"
+    "migrate": "knex migrate:latest",
+    "migrate:venue-profiles": "node scripts/runVenueProfileMigration.js"
   },
   "keywords": [],
   "author": "",

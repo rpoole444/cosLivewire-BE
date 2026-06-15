@@ -34,6 +34,9 @@ const Artist = {
         'a.profile_image',
         'a.genres',
         'a.bio',
+        'a.profile_type',
+        'a.venue_city',
+        'a.venue_state',
         'a.is_pro as artist_is_pro',
         'a.trial_active',
         'a.updated_at',
@@ -71,9 +74,16 @@ const Artist = {
 
     if (!artist) return null;
 
+    const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const events = await knex('events')
-      .where({ user_id: artist.user_id })
-      .andWhere('date', '>=', new Date())
+      .where({ is_approved: true })
+      .andWhere(function() {
+        this.where({ user_id: artist.user_id });
+        if (artist.profile_type === 'venue') {
+          this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
+        }
+      })
+      .andWhere('date', '>=', today)
       .orderBy('date');
 
       const isTrialExpired =
@@ -89,7 +99,7 @@ const Artist = {
 
   findPublicScheduleBySlug: async (slug, limit = 5) => {
     const artist = await knex('artists')
-      .select('id', 'user_id', 'display_name', 'slug')
+      .select('id', 'user_id', 'display_name', 'slug', 'profile_type')
       .where({ slug, is_approved: true })
       .whereNull('deleted_at')
       .first();
@@ -107,7 +117,13 @@ const Artist = {
         'location',
         'slug'
       )
-      .where({ user_id: artist.user_id, is_approved: true })
+      .where({ is_approved: true })
+      .andWhere(function() {
+        this.where({ user_id: artist.user_id });
+        if (artist.profile_type === 'venue') {
+          this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
+        }
+      })
       .andWhere('date', '>=', today)
       .orderBy('date')
       .orderBy('start_time')
@@ -117,6 +133,7 @@ const Artist = {
       id: artist.id,
       display_name: artist.display_name,
       slug: artist.slug,
+      profile_type: artist.profile_type || 'artist',
       events: upcomingEvents,
     };
   },
