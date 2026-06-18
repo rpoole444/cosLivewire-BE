@@ -1,6 +1,7 @@
 const express = require('express');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
+const { normalizeRegion, inferRegionFromText } = require('../utils/regions');
 
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
@@ -193,6 +194,10 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             address: event.address || '',
             date: finalDate,
             genre: event.genre || null,
+            region: normalizeRegion(
+              event.region,
+              inferRegionFromText(event.city, event.location, event.address, event.venue_name)
+            ),
             ticket_price: null,
             age_restriction: null,
             website_link: null,
@@ -281,7 +286,7 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
       return res.status(400).json({ message: updatedEvent.error });
     }
 
-    return res.json({
+  return res.json({
       ...updatedEvent,
       parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
     });

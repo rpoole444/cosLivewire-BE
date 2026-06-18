@@ -11,6 +11,7 @@ const slugify = require("../utils/slugify")
 const generateUniqueSlug = require('../utils/generateUniqueSlug');
 const isAdmin = require('../utils/isAdmin');
 const { hasProAccess } = require('../utils/access');
+const { normalizeRegion } = require('../utils/regions');
 
 const {
   deleteEvent,
@@ -62,6 +63,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website_link,
       venue_name,
       website,
+      region,
       start_time,
       end_time,
       recurrenceDates,
@@ -91,6 +93,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       website_link,
       venue_name,
       website,
+      region: normalizeRegion(region),
       start_time,
       end_time,
       slug,
@@ -163,6 +166,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
         website_link,
         venue_name,
         website,
+        region,
         start_time,
         end_time,
         ticket_price,
@@ -191,6 +195,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
         website_link,
         venue_name,
         website,
+        region: normalizeRegion(region),
         start_time,
         end_time,
         slug,
@@ -329,6 +334,7 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       venue_name,
       website,
       address,
+      region,
     } = req.body;
 
     const sanitizedPayload = {
@@ -345,6 +351,7 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       venue_name,
       website,
       address,
+      region: normalizeRegion(region || event.region),
       poster,
     };
 
@@ -377,7 +384,7 @@ eventRouter.get('/:eventId', async (req, res) => {
  */
 eventRouter.get('/', async (req, res) => {
   try {
-    const events = await getAllEvents();
+    const events = await getAllEvents({ region: req.query.region });
     res.json(events);
   } catch (error) {
     console.error(error);

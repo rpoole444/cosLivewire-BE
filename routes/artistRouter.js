@@ -20,6 +20,7 @@ const {
   communityArtistAccessIsActive,
 } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
+const { normalizeRegion } = require('../utils/regions');
 
 const MAX_EMBED_URL_LENGTH = 2000;
 const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
@@ -72,6 +73,7 @@ artistRouter.get('/public-list', async (req, res) => {
         genres: artist.genres,
         bio: artist.bio,
         profile_type: artist.profile_type || 'artist',
+        home_region: artist.home_region,
         venue_city: artist.venue_city,
         venue_state: artist.venue_state,
         is_pro: artist.user_is_pro,
@@ -301,7 +303,8 @@ artistRouter.post(
       display_name, bio, contact_email, genres, slug: customSlug,
       embed_youtube, embed_soundcloud, embed_bandcamp, tip_jar_url,
       website, profile_type, venue_address, venue_city, venue_state,
-      venue_postal_code, venue_phone, booking_email, venue_capacity, age_policy
+      venue_postal_code, venue_phone, booking_email, venue_capacity, age_policy,
+      home_region
     } = req.body;
 
     const user_id = req.user?.id;
@@ -350,6 +353,7 @@ artistRouter.post(
             tip_jar_url,
             website,
             profile_type: normalizedProfileType,
+            home_region: normalizeRegion(home_region),
             venue_address: normalizedProfileType === 'venue' ? venue_address : null,
             venue_city: normalizedProfileType === 'venue' ? venue_city : null,
             venue_state: normalizedProfileType === 'venue' ? venue_state : null,
@@ -400,6 +404,7 @@ artistRouter.post(
         tip_jar_url,
         website,
         profile_type: normalizedProfileType,
+        home_region: normalizeRegion(home_region),
         venue_address: normalizedProfileType === 'venue' ? venue_address : null,
         venue_city: normalizedProfileType === 'venue' ? venue_city : null,
         venue_state: normalizedProfileType === 'venue' ? venue_state : null,
@@ -505,6 +510,7 @@ artistRouter.put('/:slug', upload.fields([
       embed_bandcamp: req.body.embed_bandcamp,
       tip_jar_url: req.body.tip_jar_url,
       profile_type: normalizeProfileType(req.body.profile_type || artist.profile_type),
+      home_region: normalizeRegion(req.body.home_region || artist.home_region),
       venue_address: req.body.venue_address || null,
       venue_city: req.body.venue_city || null,
       venue_state: req.body.venue_state || null,

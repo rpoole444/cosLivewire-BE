@@ -4,6 +4,7 @@ const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
 const { v4: uuidv4 } = require('uuid');
 const slugify = require('../utils/slugify');
+const { REGION_ALL, REGION_SLUGS } = require('../utils/regions');
 
  // Adjust the path as necessary for your project structure
 
@@ -66,8 +67,12 @@ const updateEventStatus = (eventId, isApproved) => {
     .returning('*'); // For PostgreSQL to return the updated row
 };
 
-const getAllEvents = async () => {
-  return knex('events').select('*');
+const getAllEvents = async ({ region } = {}) => {
+  const query = knex('events').select('*');
+  if (region && region !== REGION_ALL && REGION_SLUGS.has(String(region))) {
+    query.where({ region });
+  }
+  return query;
 };
 
 const updateEvent = async(eventId, eventData) => {

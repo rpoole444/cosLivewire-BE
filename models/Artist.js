@@ -35,6 +35,7 @@ const Artist = {
         'a.genres',
         'a.bio',
         'a.profile_type',
+        'a.home_region',
         'a.venue_city',
         'a.venue_state',
         'a.is_pro as artist_is_pro',
@@ -99,7 +100,7 @@ const Artist = {
 
   findPublicScheduleBySlug: async (slug, limit = 5) => {
     const artist = await knex('artists')
-      .select('id', 'user_id', 'display_name', 'slug', 'profile_type')
+      .select('id', 'user_id', 'display_name', 'slug', 'profile_type', 'home_region')
       .where({ slug, is_approved: true })
       .whereNull('deleted_at')
       .first();
@@ -134,6 +135,7 @@ const Artist = {
       display_name: artist.display_name,
       slug: artist.slug,
       profile_type: artist.profile_type || 'artist',
+      home_region: artist.home_region,
       events: upcomingEvents,
     };
   },
