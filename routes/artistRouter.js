@@ -5,6 +5,7 @@ const knex = require('knex')(config);
 const express = require('express');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
+const crypto = require('crypto');
 const { S3Client, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
@@ -21,10 +22,20 @@ const {
 } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 const { normalizeRegion } = require('../utils/regions');
+const { sendBookingInquiryEmail } = require('../models/mailer');
 
 const MAX_EMBED_URL_LENGTH = 2000;
 const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
 const PROFILE_TYPES = new Set(['artist', 'venue', 'promoter']);
+const ANALYTICS_EVENT_TYPES = new Set([
+  'profile_view',
+  'embed_view',
+  'website_click',
+  'tip_click',
+  'ticket_click',
+  'contact_click',
+  'booking_inquiry',
+]);
 
 const normalizeProfileType = (value) =>
   PROFILE_TYPES.has(String(value || '').toLowerCase())
@@ -36,6 +47,14 @@ const parseOptionalCapacity = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
+
+const hashIp = (ip = '') => {
+  const salt = process.env.ANALYTICS_SALT || process.env.SESSION_SECRET || 'dev-analytics-salt';
+  return crypto.createHash('sha256').update(`${salt}:${ip}`).digest('hex');
+};
+
+const isValidEmail = (value = '') =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 
 const s3 = new S3Client({
   credentials: fromEnv(),
@@ -240,6 +259,117 @@ artistRouter.get('/:slug/schedule', async (req, res) => {
   } catch (err) {
     console.error('Error fetching public artist schedule:', err);
     return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.post('/:slug/track', async (req, res) => {
+  try {
+    const artist = await Artist.findBySlug(req.params.slug);
+    if (!artist || !artist.is_approved) {
+      return res.status(404).json({ message: 'Artist profile not found' });
+    }
+
+    const eventType = String(req.body?.event_type || '').trim();
+    if (!ANALYTICS_EVENT_TYPES.has(eventType)) {
+      return res.status(400).json({ message: 'Invalid analytics event type' });
+    }
+
+    const metadata = req.body?.metadata && typeof req.body.metadata === 'object'
+      ? req.body.metadata
+      : null;
+    const requestedEventId = Number.parseInt(req.body?.event_id, 10);
+
+    await knex('artist_analytics_events').insert({
+      artist_id: artist.id,
+      event_type: eventType,
+      event_id: Number.isFinite(requestedEventId) ? requestedEventId : null,
+      source: req.body?.source ? String(req.body.source).slice(0, 64) : null,
+      referrer: req.get('referer') ? String(req.get('referer')).slice(0, 512) : null,
+      user_agent: req.get('user-agent') ? String(req.get('user-agent')).slice(0, 512) : null,
+      ip_hash: hashIp(req.ip || req.headers['x-forwarded-for'] || ''),
+      metadata,
+    });
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error('Artist analytics tracking error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.get('/:slug/analytics', ensureAuth, async (req, res) => {
+  try {
+    const artist = await Artist.findBySlug(req.params.slug);
+    if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    const isOwner = artist.user_id === req.user?.id;
+    if (!isOwner && !req.user?.is_admin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const rows = await knex('artist_analytics_events')
+      .select('event_type')
+      .count({ count: '*' })
+      .where({ artist_id: artist.id })
+      .where('created_at', '>=', since)
+      .groupBy('event_type');
+
+    const counts = Object.fromEntries(Array.from(ANALYTICS_EVENT_TYPES).map((type) => [type, 0]));
+    rows.forEach((row) => {
+      counts[row.event_type] = Number(row.count || 0);
+    });
+
+    return res.json({
+      artist_id: artist.id,
+      window_days: 30,
+      counts,
+    });
+  } catch (err) {
+    console.error('Artist analytics summary error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.post('/:slug/inquiry', async (req, res) => {
+  try {
+    const artist = await Artist.findBySlug(req.params.slug);
+    if (!artist || !artist.is_approved) {
+      return res.status(404).json({ message: 'Artist profile not found' });
+    }
+
+    const inquiry = {
+      name: String(req.body?.name || '').trim(),
+      email: String(req.body?.email || '').trim(),
+      date: String(req.body?.date || '').trim(),
+      eventName: String(req.body?.eventName || '').trim(),
+      budget: String(req.body?.budget || '').trim(),
+      notes: String(req.body?.notes || '').trim(),
+    };
+
+    if (!inquiry.name || !isValidEmail(inquiry.email)) {
+      return res.status(400).json({ message: 'Name and a valid email are required.' });
+    }
+
+    if (inquiry.notes.length > 3000 || inquiry.eventName.length > 500 || inquiry.budget.length > 120) {
+      return res.status(400).json({ message: 'Inquiry is too long.' });
+    }
+
+    await sendBookingInquiryEmail({ artist, inquiry });
+    await knex('artist_analytics_events').insert({
+      artist_id: artist.id,
+      event_type: 'booking_inquiry',
+      source: 'profile',
+      referrer: req.get('referer') ? String(req.get('referer')).slice(0, 512) : null,
+      user_agent: req.get('user-agent') ? String(req.get('user-agent')).slice(0, 512) : null,
+      ip_hash: hashIp(req.ip || req.headers['x-forwarded-for'] || ''),
+      metadata: { has_date: Boolean(inquiry.date), has_budget: Boolean(inquiry.budget) },
+    });
+
+    return res.json({ message: 'Inquiry sent.' });
+  } catch (err) {
+    console.error('Booking inquiry error:', err);
+    return res.status(500).json({ message: 'Unable to send inquiry right now.' });
   }
 });
 

@@ -25,7 +25,12 @@ const LOGO_PATH = path.join(__dirname, "..", "public", "alpine_groove_guide_icon
 const DEFAULT_FRONTEND_BASE_URL = "http://localhost:3001";
 
 const getFrontendBaseUrl = () => {
-  const configuredUrl = (process.env.FRONTEND_BASE_URL || process.env.FRONTEND_URL || "").trim();
+  const configuredUrl = (
+    process.env.FRONTEND_BASE_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.CORS_ORIGIN ||
+    ""
+  ).trim();
 
   if (configuredUrl) {
     return configuredUrl.replace(/\/+$/, ""); // normalize in case of accidental trailing slash
@@ -54,6 +59,14 @@ const buildPasswordResetUrl = (resetToken) => {
 };
 
 exports.buildPasswordResetUrl = buildPasswordResetUrl;
+
+const escapeHtml = (value = "") =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 
 // ---------- 1.  password‑reset ----------
 exports.sendPasswordResetEmail = async (email, resetToken) => {
@@ -137,5 +150,39 @@ exports.sendEventApprovedEmail = async (event, userEmail) => {
       inlineImage(LOGO_PATH, "logo"),
       ...(event.poster? [inlineImage(event.poster, "poster")] : [])
     ]
+  });
+};
+
+exports.sendBookingInquiryEmail = async ({ artist, inquiry }) => {
+  const recipient = artist.booking_email || artist.contact_email;
+  if (!recipient) {
+    throw new Error("Artist does not have a booking email.");
+  }
+
+  const profileUrl = `${getFrontendBaseUrl()}/artists/${artist.slug}`;
+  const subject = `Booking inquiry for ${artist.display_name}`;
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    replyTo: inquiry.email,
+    to: recipient,
+    subject,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
+        <h2>New booking inquiry</h2>
+        <p><strong>Profile:</strong> <a href="${profileUrl}">${escapeHtml(artist.display_name)}</a></p>
+        <p><strong>Name:</strong> ${escapeHtml(inquiry.name)}</p>
+        <p><strong>Email:</strong> <a href="mailto:${escapeHtml(inquiry.email)}">${escapeHtml(inquiry.email)}</a></p>
+        <p><strong>Date:</strong> ${escapeHtml(inquiry.date || "Not provided")}</p>
+        <p><strong>Venue / Event:</strong> ${escapeHtml(inquiry.eventName || "Not provided")}</p>
+        <p><strong>Budget range:</strong> ${escapeHtml(inquiry.budget || "Not provided")}</p>
+        <p><strong>Notes:</strong></p>
+        <p style="white-space:pre-wrap">${escapeHtml(inquiry.notes || "No notes provided.")}</p>
+        <hr/>
+        <p style="font-size:12px;color:#555">This inquiry was sent through Alpine Groove Guide.</p>
+      </div>
+    `,
+    attachments: [inlineImage(LOGO_PATH, "logo")]
   });
 };

@@ -118,6 +118,9 @@ const Artist = {
         'venue_name',
         'venue_profile_id',
         'location',
+        'poster',
+        'website_link',
+        'ticket_price',
         'slug'
       )
       .where({ is_approved: true })
