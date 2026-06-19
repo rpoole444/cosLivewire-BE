@@ -2,6 +2,7 @@ const express = require('express');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 const { normalizeRegion, inferRegionFromText } = require('../utils/regions');
+const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
 
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
@@ -184,6 +185,9 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         const poster = normalizedPoster
           ? normalizedPoster
           : (defaultPosters[source] || null);
+        const venueProfileId = await findVenueProfileIdByInput(trx, {
+          venueName: event.venue_name,
+        });
 
         const rows = await trx('events')
           .insert({
@@ -203,6 +207,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             website_link: null,
             is_approved: true,
             venue_name: event.venue_name || null,
+            venue_profile_id: venueProfileId,
             website: event.website || null,
             poster,
             start_time: finalStartTime,

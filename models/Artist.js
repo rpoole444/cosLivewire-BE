@@ -81,6 +81,7 @@ const Artist = {
       .andWhere(function() {
         this.where({ user_id: artist.user_id });
         if (artist.profile_type === 'venue') {
+          this.orWhere({ venue_profile_id: artist.id });
           this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
         }
       })
@@ -115,6 +116,7 @@ const Artist = {
         'date',
         'start_time',
         'venue_name',
+        'venue_profile_id',
         'location',
         'slug'
       )
@@ -122,6 +124,7 @@ const Artist = {
       .andWhere(function() {
         this.where({ user_id: artist.user_id });
         if (artist.profile_type === 'venue') {
+          this.orWhere({ venue_profile_id: artist.id });
           this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
         }
       })

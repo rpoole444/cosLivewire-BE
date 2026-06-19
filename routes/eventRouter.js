@@ -1,4 +1,7 @@
 const express = require('express');
+const environment = process.env.NODE_ENV || 'development';
+const config = require('../knexfile')[environment];
+const knex = require('knex')(config);
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
@@ -12,6 +15,7 @@ const generateUniqueSlug = require('../utils/generateUniqueSlug');
 const isAdmin = require('../utils/isAdmin');
 const { hasProAccess } = require('../utils/access');
 const { normalizeRegion } = require('../utils/regions');
+const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
 
 const {
   deleteEvent,
@@ -62,6 +66,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       age_restriction,
       website_link,
       venue_name,
+      venue_profile_id,
       website,
       region,
       start_time,
@@ -80,6 +85,10 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     }
     if (isNaN(ticket_price)) ticket_price = null;
     const slug = providedSlug || await generateUniqueSlug(title);
+    const resolvedVenueProfileId = await findVenueProfileIdByInput(knex, {
+      venueProfileId: venue_profile_id || event.venue_profile_id,
+      venueName: venue_name,
+    });
 
     const baseEventData = {
       user_id,
@@ -92,6 +101,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
       age_restriction,
       website_link,
       venue_name,
+      venue_profile_id: resolvedVenueProfileId,
       website,
       region: normalizeRegion(region),
       start_time,
@@ -165,6 +175,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
         age_restriction,
         website_link,
         venue_name,
+        venue_profile_id,
         website,
         region,
         start_time,
@@ -182,6 +193,10 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
       if (isNaN(ticket_price)) ticket_price = null;
 
       const slug = providedSlug || await generateUniqueSlug(title);
+      const resolvedVenueProfileId = await findVenueProfileIdByInput(knex, {
+        venueProfileId: venue_profile_id,
+        venueName: venue_name,
+      });
 
       const baseEventData = {
         user_id,
@@ -194,6 +209,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
         age_restriction,
         website_link,
         venue_name,
+        venue_profile_id: resolvedVenueProfileId,
         website,
         region: normalizeRegion(region),
         start_time,
@@ -332,10 +348,16 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       age_restriction,
       website_link,
       venue_name,
+      venue_profile_id,
       website,
       address,
       region,
     } = req.body;
+
+    const resolvedVenueProfileId = await findVenueProfileIdByInput(knex, {
+      venueProfileId: venue_profile_id,
+      venueName: venue_name,
+    });
 
     const sanitizedPayload = {
       title,
@@ -349,6 +371,7 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       age_restriction,
       website_link,
       venue_name,
+      venue_profile_id: resolvedVenueProfileId,
       website,
       address,
       region: normalizeRegion(region || event.region),
