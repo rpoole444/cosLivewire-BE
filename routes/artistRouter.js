@@ -113,23 +113,28 @@ artistRouter.get('/mine', ensureAuth, async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const activeArtist = await knex('artists')
+    const activeArtists = await knex('artists')
       .where({ user_id: userId })
       .whereNull('deleted_at')
-      .first();
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc');
 
-    const deletedArtist = await knex('artists')
+    const deletedArtists = await knex('artists')
       .where({ user_id: userId })
       .whereNotNull('deleted_at')
       .orderBy('deleted_at', 'desc')
-      .first();
+      .orderBy('id', 'desc');
 
-    const hasActiveArtist = !!activeArtist;
-    const canRestore = !hasActiveArtist && !!deletedArtist;
+    const activeArtist = activeArtists[0] || null;
+    const deletedArtist = deletedArtists[0] || null;
+    const canRestore = deletedArtists.length > 0;
 
     return res.json({
-      artist: activeArtist || null,
-      deletedArtist: deletedArtist || null,
+      artist: activeArtist,
+      profiles: activeArtists,
+      profileCount: activeArtists.length,
+      deletedArtist,
+      deletedProfiles: deletedArtists,
       canRestore,
     });
   } catch (e) {
@@ -328,63 +333,13 @@ artistRouter.post(
       }
 
     try {
-      // 1) Existing by user?
-      const existingArtist = await knex('artists').where({ user_id }).first();
-
-      // 2) Soft-deleted? Restore as draft (do NOT force pro/trial)
-      if (existingArtist && existingArtist.deleted_at) {
-        const genresValue = Array.isArray(genres) ? genres : JSON.parse(genres || '[]');
-
-        const [restored] = await knex('artists')
-          .where({ id: existingArtist.id })
-          .update({
-            display_name: (display_name || '').trim(),
-            bio,
-            contact_email,
-            genres: genresValue,
-            slug,
-            profile_image: files?.profile_image?.[0]?.location || null,
-            promo_photo: files?.promo_photo?.[0]?.location || null,
-            stage_plot: files?.stage_plot?.[0]?.location || null,
-            press_kit: files?.press_kit?.[0]?.location || null,
-            embed_youtube,
-            embed_soundcloud,
-            embed_bandcamp,
-            tip_jar_url,
-            website,
-            profile_type: normalizedProfileType,
-            home_region: normalizeRegion(home_region),
-            venue_address: normalizedProfileType === 'venue' ? venue_address : null,
-            venue_city: normalizedProfileType === 'venue' ? venue_city : null,
-            venue_state: normalizedProfileType === 'venue' ? venue_state : null,
-            venue_postal_code: normalizedProfileType === 'venue' ? venue_postal_code : null,
-            venue_phone: normalizedProfileType === 'venue' ? venue_phone : null,
-            booking_email: normalizedProfileType === 'venue' ? (booking_email || contact_email) : null,
-            venue_capacity: normalizedProfileType === 'venue' ? parseOptionalCapacity(venue_capacity) : null,
-            age_policy: normalizedProfileType === 'venue' ? age_policy : null,
-            // Draft flags
-            is_listed: false,
-            is_approved: false,
-            deleted_at: null,
-            updated_at: new Date(),
-          })
-          .returning('*');
-
-        return res.status(200).json(restored);
-      }
-
-      // 3) Block if active artist already exists
-      if (existingArtist) {
-        return res.status(409).json({ message: 'Artist profile already exists' });
-      }
-
-      // 4) Slug collision check
+      // 1) Slug collision check
       const slugTaken = await Artist.slugExists(slug);
       if (slugTaken) {
         return res.status(409).json({ message: 'An artist with that slug already exists' });
       }
 
-      // 5) Create NEW draft (no auto-pro, no auto-trial)
+      // 2) Create NEW draft (no auto-pro, no auto-trial)
       const genresValue = Array.isArray(genres) ? genres : JSON.parse(genres || '[]');
 
       const newArtist = await Artist.create({
