@@ -31,12 +31,19 @@ const getEventsForReview = async () => {
   // 1) Perform a left join on "users" to include user fields
   const events = await knex('events')
     .leftJoin('users', 'events.user_id', 'users.id')
+    .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
+    .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .where('events.is_approved', false)
     .select(
       'events.*',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
-      'users.email as user_email'
+      'users.email as user_email',
+      'claimed_artist.display_name as claimed_artist_display_name',
+      'claimed_artist.slug as claimed_artist_slug',
+      'claimed_artist.profile_type as claimed_artist_profile_type',
+      'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_user.email as claimed_by_user_email'
     );
 
   // 2) Map over these rows to create a nested "user" object
@@ -46,7 +53,15 @@ const getEventsForReview = async () => {
       first_name: row.user_first_name,
       last_name: row.user_last_name,
       email: row.user_email
-    }
+    },
+    claimed_artist: row.artist_profile_id ? {
+      id: row.artist_profile_id,
+      display_name: row.claimed_artist_display_name,
+      slug: row.claimed_artist_slug,
+      profile_type: row.claimed_artist_profile_type,
+      user_id: row.claimed_artist_user_id,
+    } : null,
+    claimed_by_user_email: row.claimed_by_user_email,
   }));
 
   // 3) Clean up the flattened fields
@@ -54,6 +69,10 @@ const getEventsForReview = async () => {
     delete event.user_first_name;
     delete event.user_last_name;
     delete event.user_email;
+    delete event.claimed_artist_display_name;
+    delete event.claimed_artist_slug;
+    delete event.claimed_artist_profile_type;
+    delete event.claimed_artist_user_id;
   });
 
   return shapedEvents;
@@ -85,11 +104,18 @@ const updateEvent = async(eventId, eventData) => {
 const findEventById = async (eventId) => {
   const event = await knex('events')
     .leftJoin('users', 'events.user_id', 'users.id')
+    .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
+    .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .select(
       'events.*',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
-      'users.email as user_email'
+      'users.email as user_email',
+      'claimed_artist.display_name as claimed_artist_display_name',
+      'claimed_artist.slug as claimed_artist_slug',
+      'claimed_artist.profile_type as claimed_artist_profile_type',
+      'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_user.email as claimed_by_user_email'
     )
     .where('events.id', eventId)
     .first();
@@ -104,12 +130,44 @@ const findEventById = async (eventId) => {
       last_name: event.user_last_name,
       email: event.user_email,
     },
+    claimed_artist: event.artist_profile_id ? {
+      id: event.artist_profile_id,
+      display_name: event.claimed_artist_display_name,
+      slug: event.claimed_artist_slug,
+      profile_type: event.claimed_artist_profile_type,
+      user_id: event.claimed_artist_user_id,
+    } : null,
+    claimed_by_user_email: event.claimed_by_user_email,
   };
 };
 const findBySlug = async (slug) => {
-  return knex('events')
-    .where({ slug, is_approved: true }) 
+  const event = await knex('events')
+    .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
+    .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
+    .select(
+      'events.*',
+      'claimed_artist.display_name as claimed_artist_display_name',
+      'claimed_artist.slug as claimed_artist_slug',
+      'claimed_artist.profile_type as claimed_artist_profile_type',
+      'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_user.email as claimed_by_user_email'
+    )
+    .where({ 'events.slug': slug, 'events.is_approved': true })
     .first();
+
+  if (!event) return null;
+
+  return {
+    ...event,
+    claimed_artist: event.artist_profile_id ? {
+      id: event.artist_profile_id,
+      display_name: event.claimed_artist_display_name,
+      slug: event.claimed_artist_slug,
+      profile_type: event.claimed_artist_profile_type,
+      user_id: event.claimed_artist_user_id,
+    } : null,
+    claimed_by_user_email: event.claimed_by_user_email,
+  };
 }
 
 
