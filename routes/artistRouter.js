@@ -539,16 +539,9 @@ artistRouter.post(
       }
 
     try {
-      // 1) Slug collision check
-      const slugTaken = await Artist.slugExists(slug);
-      if (slugTaken) {
-        return res.status(409).json({ message: 'An artist with that slug already exists' });
-      }
-
-      // 2) Create NEW draft (no auto-pro, no auto-trial)
       const genresValue = Array.isArray(genres) ? genres : JSON.parse(genres || '[]');
 
-      const newArtist = await Artist.create({
+      const profilePayload = {
         user_id,
         display_name: (display_name || '').trim(),
         bio,
@@ -588,7 +581,36 @@ artistRouter.post(
         is_listed: false,
         is_approved: false,
         // keep whatever columns you already have; do NOT flip is_pro/trial here
-      });
+      };
+
+      // 1) Slug collision check. If this is the user's own hidden draft,
+      // update it instead of forcing a fake URL like "venue-name-2".
+      let newArtist;
+      const existingWithSlug = await knex('artists').where({ slug }).first();
+      if (existingWithSlug) {
+        const reusableOwnDraft =
+          existingWithSlug.user_id === user_id &&
+          !existingWithSlug.is_approved &&
+          !existingWithSlug.is_listed &&
+          !existingWithSlug.deleted_at;
+
+        if (!reusableOwnDraft) {
+          return res.status(409).json({
+            message: `${isVenueProfile ? 'A venue' : 'An artist'} with that slug already exists`,
+          });
+        }
+
+        [newArtist] = await knex('artists')
+          .where({ id: existingWithSlug.id })
+          .update({
+            ...profilePayload,
+            updated_at: new Date(),
+          })
+          .returning('*');
+      } else {
+        // 2) Create NEW draft (no auto-pro, no auto-trial)
+        newArtist = await Artist.create(profilePayload);
+      }
 
       try {
         const user = await knex('users').where({ id: user_id }).first();
@@ -621,7 +643,9 @@ artistRouter.post(
       return res.status(201).json(newArtist);
     } catch (err) {
       if (err.code === '23505') {
-        return res.status(409).json({ message: 'An artist with that slug already exists' });
+        return res.status(409).json({
+          message: `${isVenueProfile ? 'A venue' : 'An artist'} with that slug already exists`,
+        });
       }
       console.error('Create artist error:', err);
       return res.status(500).json({ message: 'Server error' });
