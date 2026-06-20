@@ -9,7 +9,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const DAY_HEADER_REGEX = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+([A-Za-z]+)\s+(\d{1,2})/i;
-const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.m\.|p\.m\.|am|pm)/gi;
+const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)/gi;
 const DEBUG_PARSER = process.env.DEBUG_PARSER === 'true';
 
 const debugLog = (message) => {
@@ -137,6 +137,8 @@ const buildEvent = ({ venue, artistDisplay, time, date, rawBlock, warnings }) =>
     venue_name: venue,
     artist_display: resolvedArtist,
     start_at: startAt.toDate(),
+    date: localDateTime.format('YYYY-MM-DD'),
+    start_time: localDateTime.format('HH:mm:ss'),
     raw_block: rawBlock,
     parse_warnings: resolvedWarnings,
     fingerprint,
@@ -247,9 +249,9 @@ const parseVenueLine = (line, date) => {
     const segmentTimes = extractTimes(segment);
     const normalized = segment
       .replace(TIME_REGEX, '')
-      .replace(/[&]/g, ' ')
       .replace(/\s+/g, ' ')
-      .trim();
+      .trim()
+      .replace(/^(?:&\s*)+$/, '');
     const isTba = normalized && normalizeText(normalized) === 'tba';
     const hasArtist = normalized && !isTba;
 

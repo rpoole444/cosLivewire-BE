@@ -1,8 +1,14 @@
 const express = require('express');
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 const { normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
@@ -63,6 +69,8 @@ importsRouter.post('/moondog', async (req, res) => {
         venue_name: event.venue_name,
         artist_display: event.artist_display,
         start_at: event.start_at,
+        date: event.date,
+        start_time: event.start_time,
         raw_block: event.raw_block,
         parse_warnings: JSON.stringify(event.parse_warnings || []),
         fingerprint: event.fingerprint,
@@ -98,6 +106,16 @@ const parseWarningsField = (value) => {
     }
   }
   return [];
+};
+
+const getDenverDateTimeParts = (value) => {
+  if (!value) return {};
+  const parsed = dayjs(value).tz('America/Denver');
+  if (!parsed.isValid()) return {};
+  return {
+    date: parsed.format('YYYY-MM-DD'),
+    start_time: parsed.format('HH:mm:ss'),
+  };
 };
 
 // Promote accepted import events into public events (all-or-nothing).
@@ -164,12 +182,13 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
 
       for (const event of acceptedEvents) {
         // Use literal local date/time from the import record; no timezone conversion here.
-        const finalDate = event.date || null;
+        const fallbackTiming = getDenverDateTimeParts(event.start_at);
+        const finalDate = event.date || fallbackTiming.date || null;
         if (!finalDate) {
           throw new Error(`Missing date for import_event ${event.id}`);
         }
 
-        const finalStartTime = event.start_time || null;
+        const finalStartTime = event.start_time || fallbackTiming.start_time || null;
         if (!finalStartTime) {
           throw new Error(`Missing start_time for import_event ${event.id}`);
         }
@@ -268,8 +287,8 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
         return null;
       }
 
-      if (event.status !== 'pending') {
-        return { error: 'Event is not pending' };
+      if (event.promoted_event_id) {
+        return { error: 'Event has already been promoted' };
       }
 
       const rows = await trx('import_events')
@@ -278,6 +297,8 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
           status: 'accepted',
           accepted_by: req.user?.id || null,
           accepted_at: knex.fn.now(),
+          rejected_by: null,
+          rejected_at: null,
         })
         .returning('*');
 
@@ -318,14 +339,16 @@ importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, 
         return null;
       }
 
-      if (event.status !== 'pending') {
-        return { error: 'Event is not pending' };
+      if (event.promoted_event_id) {
+        return { error: 'Event has already been promoted' };
       }
 
       const rows = await trx('import_events')
         .where({ id: eventId })
         .update({
           status: 'rejected',
+          accepted_by: null,
+          accepted_at: null,
           rejected_by: req.user?.id || null,
           rejected_at: knex.fn.now(),
         })

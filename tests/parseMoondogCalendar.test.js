@@ -11,6 +11,8 @@ const rawText = [
   'Thursday, Dec 11',
   'Tokki, Heavy Devils Trio, 6:30 p.m.',
   'Kinfolks, Ram Jam, 3 p.m., Eli Blackshear, 8:30 p.m.',
+  'Buffalo Lodge, RV Casino, Annette & Doug Conlon, Co Spgs Pickers, 2 p.m.',
+  'Cantina Verde, Matt Cravatta, 5 p.m',
   'Friday, Dec 12',
   'Moondog Lounge, TBA, 9 p.m.',
   'Whiskey Baron, Band A, Band B, 7 p.m.',
@@ -20,7 +22,7 @@ const rawText = [
 
 const events = parseMoondogCalendar(rawText);
 
-assert.strictEqual(events.length, 7, 'expected 7 parsed events');
+assert.strictEqual(events.length, 9, 'expected 9 parsed events');
 
 const tokkiEvent = events[0];
 assert.strictEqual(tokkiEvent.venue_name, 'Tokki');
@@ -35,6 +37,19 @@ const kinfolksEvents = events.filter((event) => event.venue_name === 'Kinfolks')
 assert.strictEqual(kinfolksEvents.length, 2);
 assert.strictEqual(kinfolksEvents[0].artist_display, 'Ram Jam');
 assert.strictEqual(kinfolksEvents[1].artist_display, 'Eli Blackshear');
+
+const buffaloLodgeEvent = events.find((event) => event.venue_name === 'Buffalo Lodge');
+assert.strictEqual(
+  buffaloLodgeEvent.artist_display,
+  'RV Casino, Annette & Doug Conlon, Co Spgs Pickers'
+);
+assert.ok(buffaloLodgeEvent.parse_warnings.includes('multiple_artists'));
+assert.ok(buffaloLodgeEvent.date);
+assert.ok(buffaloLodgeEvent.start_time);
+
+const cantinaEvent = events.find((event) => event.venue_name === 'Cantina Verde');
+assert.strictEqual(cantinaEvent.artist_display, 'Matt Cravatta');
+assert.strictEqual(cantinaEvent.start_time, '17:00:00');
 
 const multiArtistEvent = events.find((event) => event.venue_name === 'Whiskey Baron');
 assert.ok(multiArtistEvent.parse_warnings.includes('multiple_artists'));
