@@ -490,6 +490,46 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
   }
 });
 
+eventRouter.get('/claims/mine', async (req, res) => {
+  if (!req.isAuthenticated?.()) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  try {
+    const claims = await knex('event_claim_requests as ecr')
+      .join('events as e', 'ecr.event_id', 'e.id')
+      .join('artists as a', 'ecr.artist_profile_id', 'a.id')
+      .leftJoin('users as reviewer', 'ecr.reviewed_by_user_id', 'reviewer.id')
+      .select(
+        'ecr.id',
+        'ecr.event_id',
+        'ecr.artist_profile_id',
+        'ecr.status',
+        'ecr.created_at',
+        'ecr.reviewed_at',
+        'ecr.admin_notes',
+        'e.title as event_title',
+        'e.slug as event_slug',
+        'e.date as event_date',
+        'e.start_time as event_start_time',
+        'e.venue_name as event_venue_name',
+        'e.artist_profile_id as current_artist_profile_id',
+        'a.display_name as artist_display_name',
+        'a.slug as artist_slug',
+        'reviewer.email as reviewed_by_email'
+      )
+      .where('a.user_id', req.user.id)
+      .whereNull('a.deleted_at')
+      .orderBy('ecr.created_at', 'desc')
+      .limit(50);
+
+    return res.json(claims);
+  } catch (error) {
+    console.error('Error loading user event claims:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 /**
  * Claim an imported/promoter/venue-created event for an artist profile.
  * Claiming creates an admin-reviewed request. Approval attaches the event and grants edit access.
