@@ -42,6 +42,10 @@ const normalizeProfileType = (value) =>
     ? String(value).toLowerCase()
     : 'artist';
 
+const canManageProfile = (profile, user) => (
+  !!profile && !!user && (profile.user_id === user.id || user.is_admin)
+);
+
 const parseOptionalCapacity = (value) => {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number.parseInt(value, 10);
@@ -271,7 +275,8 @@ artistRouter.get('/:slug/schedule', async (req, res) => {
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), 12)
       : 5;
-    const schedule = await Artist.findPublicScheduleBySlug(req.params.slug, limit);
+    const mode = req.query.mode === 'top-picks' ? 'top-picks' : 'upcoming';
+    const schedule = await Artist.findPublicScheduleBySlug(req.params.slug, limit, { mode });
 
     if (!schedule) {
       return res.status(404).json({ message: 'Artist schedule not found' });
@@ -281,6 +286,70 @@ artistRouter.get('/:slug/schedule', async (req, res) => {
     return res.json(schedule);
   } catch (err) {
     console.error('Error fetching public artist schedule:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.get('/:slug/top-picks', ensureAuth, async (req, res) => {
+  try {
+    const artist = await Artist.findBySlug(req.params.slug);
+    if (!artist) return res.status(404).json({ message: 'Profile not found' });
+    if (!canManageProfile(artist, req.user)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const manageList = await Artist.findTopPicksManageListBySlug(req.params.slug);
+    if (!manageList) return res.status(404).json({ message: 'Profile not found' });
+
+    return res.json(manageList);
+  } catch (err) {
+    console.error('Error fetching profile top picks:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+artistRouter.put('/:slug/top-picks', ensureAuth, async (req, res) => {
+  try {
+    const artist = await Artist.findBySlug(req.params.slug);
+    if (!artist) return res.status(404).json({ message: 'Profile not found' });
+    if (!canManageProfile(artist, req.user)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const eventIds = Array.isArray(req.body?.event_ids)
+      ? req.body.event_ids
+          .map((id) => Number.parseInt(id, 10))
+          .filter((id) => Number.isInteger(id) && id > 0)
+      : [];
+
+    const uniqueEventIds = [...new Set(eventIds)].slice(0, 24);
+    const manageList = await Artist.findTopPicksManageListBySlug(req.params.slug);
+    if (!manageList) return res.status(404).json({ message: 'Profile not found' });
+
+    const allowedIds = new Set(manageList.events.map((event) => Number(event.id)));
+    const selectedIds = uniqueEventIds.filter((id) => allowedIds.has(id));
+
+    await knex.transaction(async (trx) => {
+      await trx('profile_featured_events')
+        .where({ profile_id: artist.id })
+        .del();
+
+      if (selectedIds.length) {
+        await trx('profile_featured_events').insert(
+          selectedIds.map((eventId, index) => ({
+            profile_id: artist.id,
+            event_id: eventId,
+            featured_order: index,
+            updated_at: trx.fn.now(),
+          }))
+        );
+      }
+    });
+
+    const updated = await Artist.findTopPicksManageListBySlug(req.params.slug);
+    return res.json(updated);
+  } catch (err) {
+    console.error('Error saving profile top picks:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 });

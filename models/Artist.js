@@ -9,6 +9,35 @@ const timezone = require('dayjs/plugin/timezone');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const selectPublicEventFields = [
+  'events.id',
+  'events.title',
+  'events.date',
+  'events.start_time',
+  'events.venue_name',
+  'events.venue_profile_id',
+  'events.location',
+  'events.poster',
+  'events.website_link',
+  'events.ticket_price',
+  'events.slug',
+  'events.source',
+  'events.source_label',
+];
+
+const applyProfileEventMatch = (builder, artist) => {
+  if (artist.profile_type === 'venue') {
+    builder
+      .where({ venue_profile_id: artist.id })
+      .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
+    return;
+  }
+
+  builder
+    .where({ artist_profile_id: artist.id })
+    .orWhere({ user_id: artist.user_id });
+};
+
 const Artist = {
   findBySlug: async (slug) => {
     return knex('artists')
@@ -76,19 +105,11 @@ const Artist = {
     if (!artist) return null;
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
-    const applyProfileEventMatch = (builder) => {
-      if (artist.profile_type === 'venue') {
-        builder
-          .where({ venue_profile_id: artist.id })
-          .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
-        return;
-      }
-      builder.where({ user_id: artist.user_id });
-    };
-
     const events = await knex('events')
       .where({ is_approved: true })
-      .andWhere(applyProfileEventMatch)
+      .andWhere(function() {
+        applyProfileEventMatch(this, artist);
+      })
       .andWhere('date', '>=', today)
       .orderBy('date');
 
@@ -96,7 +117,9 @@ const Artist = {
       ? await knex('events')
           .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'genre', 'poster', 'slug', 'source', 'source_label')
           .where({ is_approved: true })
-          .andWhere(applyProfileEventMatch)
+          .andWhere(function() {
+            applyProfileEventMatch(this, artist);
+          })
           .andWhere('date', '<', today)
           .orderBy('date', 'desc')
           .orderBy('start_time', 'desc')
@@ -115,7 +138,7 @@ const Artist = {
     };
   },
 
-  findPublicScheduleBySlug: async (slug, limit = 5) => {
+  findPublicScheduleBySlug: async (slug, limit = 5, options = {}) => {
     const artist = await knex('artists')
       .select('id', 'user_id', 'display_name', 'slug', 'profile_type', 'home_region')
       .where({ slug, is_approved: true })
@@ -125,34 +148,29 @@ const Artist = {
     if (!artist) return null;
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
-    const upcomingEvents = await knex('events')
-      .select(
-        'id',
-        'title',
-        'date',
-        'start_time',
-        'venue_name',
-        'venue_profile_id',
-        'location',
-        'poster',
-        'website_link',
-        'ticket_price',
-        'slug',
-        'source',
-        'source_label'
-      )
-      .where({ is_approved: true })
-      .andWhere(function() {
-        this.where({ user_id: artist.user_id });
-        if (artist.profile_type === 'venue') {
-          this.orWhere({ venue_profile_id: artist.id });
-          this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
-        }
-      })
-      .andWhere('date', '>=', today)
-      .orderBy('date')
-      .orderBy('start_time')
-      .limit(limit);
+    const mode = options.mode === 'top-picks' ? 'top-picks' : 'upcoming';
+    const query = knex('events')
+      .select(selectPublicEventFields)
+      .where({ 'events.is_approved': true })
+      .andWhere('events.date', '>=', today);
+
+    if (mode === 'top-picks') {
+      query
+        .join('profile_featured_events as pfe', 'pfe.event_id', 'events.id')
+        .andWhere('pfe.profile_id', artist.id)
+        .orderBy('pfe.featured_order')
+        .orderBy('events.date')
+        .orderBy('events.start_time');
+    } else {
+      query
+        .andWhere(function() {
+          applyProfileEventMatch(this, artist);
+        })
+        .orderBy('events.date')
+        .orderBy('events.start_time');
+    }
+
+    const upcomingEvents = await query.limit(limit);
 
     return {
       id: artist.id,
@@ -160,7 +178,42 @@ const Artist = {
       slug: artist.slug,
       profile_type: artist.profile_type || 'artist',
       home_region: artist.home_region,
+      mode,
       events: upcomingEvents,
+    };
+  },
+
+  findTopPicksManageListBySlug: async (slug) => {
+    const artist = await knex('artists')
+      .select('id', 'user_id', 'display_name', 'slug', 'profile_type')
+      .where({ slug })
+      .whereNull('deleted_at')
+      .first();
+
+    if (!artist) return null;
+
+    const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
+    const events = await knex('events')
+      .leftJoin('profile_featured_events as pfe', function() {
+        this.on('pfe.event_id', '=', 'events.id')
+          .andOn('pfe.profile_id', '=', knex.raw('?', [artist.id]));
+      })
+      .select(
+        ...selectPublicEventFields,
+        'pfe.featured_order',
+        knex.raw('pfe.id IS NOT NULL as is_top_pick')
+      )
+      .where({ 'events.is_approved': true })
+      .andWhere(function() {
+        applyProfileEventMatch(this, artist);
+      })
+      .andWhere('events.date', '>=', today)
+      .orderBy('events.date')
+      .orderBy('events.start_time');
+
+    return {
+      profile: artist,
+      events,
     };
   },
 
