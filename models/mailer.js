@@ -186,3 +186,40 @@ exports.sendBookingInquiryEmail = async ({ artist, inquiry }) => {
     attachments: [inlineImage(LOGO_PATH, "logo")]
   });
 };
+
+exports.sendVenueBookingRequestEmail = async ({ venue, inquiry }) => {
+  const recipient = venue.booking_email || venue.contact_email;
+  if (!recipient) {
+    throw new Error("Venue does not have a booking email.");
+  }
+
+  const profileUrl = `${getFrontendBaseUrl()}/artists/${venue.slug}`;
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    replyTo: inquiry.email,
+    to: recipient,
+    subject: `Venue booking request for ${venue.display_name}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
+        <h2>New venue booking request</h2>
+        <p><strong>Venue:</strong> <a href="${profileUrl}">${escapeHtml(venue.display_name)}</a></p>
+        <p><strong>Artist:</strong> ${escapeHtml(inquiry.artistName)}</p>
+        <p><strong>Email:</strong> <a href="mailto:${escapeHtml(inquiry.email)}">${escapeHtml(inquiry.email)}</a></p>
+        <p><strong>Genre / style:</strong> ${escapeHtml(inquiry.genre || "Not provided")}</p>
+        <p><strong>Draw estimate:</strong> ${escapeHtml(inquiry.drawEstimate || "Not provided")}</p>
+        <p><strong>Preferred dates:</strong> ${escapeHtml(inquiry.preferredDates || "Not provided")}</p>
+        <p><strong>Links:</strong></p>
+        <p style="white-space:pre-wrap">${escapeHtml(inquiry.links || "No links provided.")}</p>
+        <p><strong>Support needs:</strong></p>
+        <p style="white-space:pre-wrap">${escapeHtml(inquiry.supportNeeds || "No support needs provided.")}</p>
+        <p><strong>Notes:</strong></p>
+        <p style="white-space:pre-wrap">${escapeHtml(inquiry.notes || "No notes provided.")}</p>
+        <hr/>
+        <p style="font-size:12px;color:#555">This booking request was sent through Alpine Groove Guide.</p>
+      </div>
+    `,
+    attachments: [inlineImage(LOGO_PATH, "logo")]
+  });
+};

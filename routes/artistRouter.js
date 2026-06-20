@@ -22,7 +22,7 @@ const {
 } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 const { normalizeRegion } = require('../utils/regions');
-const { sendBookingInquiryEmail } = require('../models/mailer');
+const { sendBookingInquiryEmail, sendVenueBookingRequestEmail } = require('../models/mailer');
 
 const MAX_EMBED_URL_LENGTH = 2000;
 const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
@@ -47,6 +47,23 @@ const parseOptionalCapacity = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
+
+const cleanOptionalText = (value, maxLength = 3000) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLength);
+};
+
+const venuePacketFieldsFromBody = (body, isVenue) => ({
+  venue_stage_size: isVenue ? cleanOptionalText(body.venue_stage_size, 160) : null,
+  venue_pa_details: isVenue ? cleanOptionalText(body.venue_pa_details) : null,
+  venue_backline: isVenue ? cleanOptionalText(body.venue_backline) : null,
+  venue_load_in: isVenue ? cleanOptionalText(body.venue_load_in) : null,
+  venue_parking: isVenue ? cleanOptionalText(body.venue_parking) : null,
+  venue_green_room: isVenue ? cleanOptionalText(body.venue_green_room) : null,
+  venue_sound_contact: isVenue ? cleanOptionalText(body.venue_sound_contact, 255) : null,
+  venue_booking_policy: isVenue ? cleanOptionalText(body.venue_booking_policy) : null,
+});
 
 const hashIp = (ip = '') => {
   const salt = process.env.ANALYTICS_SALT || process.env.SESSION_SECRET || 'dev-analytics-salt';
@@ -373,6 +390,62 @@ artistRouter.post('/:slug/inquiry', async (req, res) => {
   }
 });
 
+artistRouter.post('/:slug/venue-booking-request', async (req, res) => {
+  try {
+    const venue = await Artist.findBySlug(req.params.slug);
+    if (!venue || !venue.is_approved || venue.profile_type !== 'venue') {
+      return res.status(404).json({ message: 'Venue profile not found' });
+    }
+
+    const inquiry = {
+      artistName: String(req.body?.artistName || '').trim(),
+      email: String(req.body?.email || '').trim(),
+      genre: String(req.body?.genre || '').trim(),
+      drawEstimate: String(req.body?.drawEstimate || '').trim(),
+      links: String(req.body?.links || '').trim(),
+      preferredDates: String(req.body?.preferredDates || '').trim(),
+      supportNeeds: String(req.body?.supportNeeds || '').trim(),
+      notes: String(req.body?.notes || '').trim(),
+    };
+
+    if (!inquiry.artistName || !isValidEmail(inquiry.email)) {
+      return res.status(400).json({ message: 'Artist name and a valid email are required.' });
+    }
+
+    const tooLong = [
+      inquiry.genre,
+      inquiry.drawEstimate,
+      inquiry.links,
+      inquiry.preferredDates,
+      inquiry.supportNeeds,
+      inquiry.notes,
+    ].some((value) => value.length > 3000);
+
+    if (tooLong) {
+      return res.status(400).json({ message: 'Booking request is too long.' });
+    }
+
+    await sendVenueBookingRequestEmail({ venue, inquiry });
+    await knex('artist_analytics_events').insert({
+      artist_id: venue.id,
+      event_type: 'booking_inquiry',
+      source: 'venue_booking_request',
+      referrer: req.get('referer') ? String(req.get('referer')).slice(0, 512) : null,
+      user_agent: req.get('user-agent') ? String(req.get('user-agent')).slice(0, 512) : null,
+      ip_hash: hashIp(req.ip || req.headers['x-forwarded-for'] || ''),
+      metadata: {
+        has_preferred_dates: Boolean(inquiry.preferredDates),
+        has_draw_estimate: Boolean(inquiry.drawEstimate),
+      },
+    });
+
+    return res.json({ message: 'Booking request sent.' });
+  } catch (err) {
+    console.error('Venue booking request error:', err);
+    return res.status(500).json({ message: 'Unable to send booking request right now.' });
+  }
+});
+
 
 // GET artist by slug (public-facing profile)
 artistRouter.get('/:slug', async (req, res) => {
@@ -439,11 +512,14 @@ artistRouter.post(
       embed_youtube, embed_soundcloud, embed_bandcamp, tip_jar_url,
       website, profile_type, venue_address, venue_city, venue_state,
       venue_postal_code, venue_phone, booking_email, venue_capacity, age_policy,
+      venue_stage_size, venue_pa_details, venue_backline, venue_load_in,
+      venue_parking, venue_green_room, venue_sound_contact, venue_booking_policy,
       home_region
     } = req.body;
 
     const user_id = req.user?.id;
     const normalizedProfileType = normalizeProfileType(profile_type);
+    const isVenueProfile = normalizedProfileType === 'venue';
     const slug = (customSlug || display_name || '')
       .toLowerCase()
       .trim()
@@ -458,7 +534,7 @@ artistRouter.post(
       if (!files?.profile_image?.[0]) {
         return res.status(400).json({ message: 'Please upload a profile image.' });
       }
-      if (normalizedProfileType === 'venue' && (!venue_address || !venue_city)) {
+      if (isVenueProfile && (!venue_address || !venue_city)) {
         return res.status(400).json({ message: 'Venue address and city are required.' });
       }
 
@@ -490,14 +566,24 @@ artistRouter.post(
         website,
         profile_type: normalizedProfileType,
         home_region: normalizeRegion(home_region),
-        venue_address: normalizedProfileType === 'venue' ? venue_address : null,
-        venue_city: normalizedProfileType === 'venue' ? venue_city : null,
-        venue_state: normalizedProfileType === 'venue' ? venue_state : null,
-        venue_postal_code: normalizedProfileType === 'venue' ? venue_postal_code : null,
-        venue_phone: normalizedProfileType === 'venue' ? venue_phone : null,
-        booking_email: normalizedProfileType === 'venue' ? (booking_email || contact_email) : null,
-        venue_capacity: normalizedProfileType === 'venue' ? parseOptionalCapacity(venue_capacity) : null,
-        age_policy: normalizedProfileType === 'venue' ? age_policy : null,
+        venue_address: isVenueProfile ? venue_address : null,
+        venue_city: isVenueProfile ? venue_city : null,
+        venue_state: isVenueProfile ? venue_state : null,
+        venue_postal_code: isVenueProfile ? venue_postal_code : null,
+        venue_phone: isVenueProfile ? venue_phone : null,
+        booking_email: isVenueProfile ? (booking_email || contact_email) : null,
+        venue_capacity: isVenueProfile ? parseOptionalCapacity(venue_capacity) : null,
+        age_policy: isVenueProfile ? age_policy : null,
+        ...venuePacketFieldsFromBody({
+          venue_stage_size,
+          venue_pa_details,
+          venue_backline,
+          venue_load_in,
+          venue_parking,
+          venue_green_room,
+          venue_sound_contact,
+          venue_booking_policy,
+        }, isVenueProfile),
         // Draft flags
         is_listed: false,
         is_approved: false,
@@ -584,6 +670,8 @@ artistRouter.put('/:slug', upload.fields([
   }
 
   try {
+    const normalizedProfileType = normalizeProfileType(req.body.profile_type || artist.profile_type);
+    const isVenueProfile = normalizedProfileType === 'venue';
     const updatedFields = {
       display_name: req.body.display_name,
       bio: req.body.bio,
@@ -594,16 +682,17 @@ artistRouter.put('/:slug', upload.fields([
       embed_soundcloud: req.body.embed_soundcloud,
       embed_bandcamp: req.body.embed_bandcamp,
       tip_jar_url: req.body.tip_jar_url,
-      profile_type: normalizeProfileType(req.body.profile_type || artist.profile_type),
+      profile_type: normalizedProfileType,
       home_region: normalizeRegion(req.body.home_region || artist.home_region),
-      venue_address: req.body.venue_address || null,
-      venue_city: req.body.venue_city || null,
-      venue_state: req.body.venue_state || null,
-      venue_postal_code: req.body.venue_postal_code || null,
-      venue_phone: req.body.venue_phone || null,
-      booking_email: req.body.booking_email || null,
-      venue_capacity: parseOptionalCapacity(req.body.venue_capacity),
-      age_policy: req.body.age_policy || null,
+      venue_address: isVenueProfile ? cleanOptionalText(req.body.venue_address, 255) : null,
+      venue_city: isVenueProfile ? cleanOptionalText(req.body.venue_city, 255) : null,
+      venue_state: isVenueProfile ? cleanOptionalText(req.body.venue_state, 64) : null,
+      venue_postal_code: isVenueProfile ? cleanOptionalText(req.body.venue_postal_code, 20) : null,
+      venue_phone: isVenueProfile ? cleanOptionalText(req.body.venue_phone, 40) : null,
+      booking_email: isVenueProfile ? cleanOptionalText(req.body.booking_email || req.body.contact_email, 255) : null,
+      venue_capacity: isVenueProfile ? parseOptionalCapacity(req.body.venue_capacity) : null,
+      age_policy: isVenueProfile ? cleanOptionalText(req.body.age_policy, 80) : null,
+      ...venuePacketFieldsFromBody(req.body, isVenueProfile),
       genres: (() => {
         const raw = req.body.genres;
         if (Array.isArray(raw)) return raw;

@@ -76,17 +76,32 @@ const Artist = {
     if (!artist) return null;
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
+    const applyProfileEventMatch = (builder) => {
+      if (artist.profile_type === 'venue') {
+        builder
+          .where({ venue_profile_id: artist.id })
+          .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
+        return;
+      }
+      builder.where({ user_id: artist.user_id });
+    };
+
     const events = await knex('events')
       .where({ is_approved: true })
-      .andWhere(function() {
-        this.where({ user_id: artist.user_id });
-        if (artist.profile_type === 'venue') {
-          this.orWhere({ venue_profile_id: artist.id });
-          this.orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
-        }
-      })
+      .andWhere(applyProfileEventMatch)
       .andWhere('date', '>=', today)
       .orderBy('date');
+
+    const pastEvents = artist.profile_type === 'venue'
+      ? await knex('events')
+          .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'genre', 'poster', 'slug')
+          .where({ is_approved: true })
+          .andWhere(applyProfileEventMatch)
+          .andWhere('date', '<', today)
+          .orderBy('date', 'desc')
+          .orderBy('start_time', 'desc')
+          .limit(12)
+      : [];
 
       const isTrialExpired =
         artist.trial_ends_at !== null ? !isInTrial(artist.trial_ends_at) : false;
@@ -95,6 +110,7 @@ const Artist = {
     return {
       ...artist,
       events,
+      past_events: pastEvents,
       trial_expired: isTrialExpired,
     };
   },
