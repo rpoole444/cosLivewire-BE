@@ -312,6 +312,64 @@ eventRouter.put('/review/:eventId', isAdmin, async (req, res) => {
   }
 });
 
+eventRouter.get('/admin/summary', isAdmin, async (req, res) => {
+  try {
+    const [
+      pendingEvents,
+      pendingProfiles,
+      pendingClaims,
+      recentApprovedEvents,
+      recentImports,
+    ] = await Promise.all([
+      knex('events').where({ is_approved: false }).count({ count: '*' }).first(),
+      knex('artists').where({ is_approved: false }).whereNull('deleted_at').count({ count: '*' }).first(),
+      knex('event_claim_requests').where({ status: 'pending' }).count({ count: '*' }).first(),
+      knex('events')
+        .select('id', 'title', 'slug', 'date', 'start_time', 'venue_name', 'region', 'updated_at', 'source_label')
+        .where({ is_approved: true })
+        .orderBy('updated_at', 'desc')
+        .limit(6),
+      knex('import_batches as ib')
+        .leftJoin('import_events as ie', 'ie.batch_id', 'ib.id')
+        .select(
+          'ib.id',
+          'ib.source',
+          'ib.status',
+          'ib.created_at',
+          'ib.completed_at',
+          knex.raw('COUNT(ie.id)::int as event_count'),
+          knex.raw("COUNT(*) FILTER (WHERE ie.status = 'pending')::int as pending_count"),
+          knex.raw("COUNT(*) FILTER (WHERE ie.status = 'accepted')::int as accepted_count"),
+          knex.raw("COUNT(*) FILTER (WHERE ie.status = 'rejected')::int as rejected_count")
+        )
+        .groupBy('ib.id')
+        .orderBy('ib.created_at', 'desc')
+        .limit(6),
+    ]);
+
+    const toNumber = (row) => Number(row?.count || 0);
+
+    return res.json({
+      counts: {
+        pending_events: toNumber(pendingEvents),
+        pending_profiles: toNumber(pendingProfiles),
+        pending_claims: toNumber(pendingClaims),
+      },
+      recent_approved_events: recentApprovedEvents,
+      recent_imports: recentImports,
+      quick_links: [
+        { label: 'Public calendar', href: '/' },
+        { label: 'Artist directory', href: '/artists' },
+        { label: 'Venue directory', href: '/venues/colorado-springs' },
+        { label: 'Import Moondog', href: '/admin/import' },
+      ],
+    });
+  } catch (error) {
+    console.error('Error loading admin summary:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 eventRouter.get('/claims/review', isAdmin, async (req, res) => {
   try {
     const claims = await knex('event_claim_requests as ecr')

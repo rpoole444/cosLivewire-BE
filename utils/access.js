@@ -9,15 +9,14 @@ const ACCESS_STATES = {
   NONE: 'none',
 };
 
-const COMMUNITY_ARTIST_ACCESS_END_DATE = '2026-12-31';
-const COMMUNITY_ARTIST_ACCESS_END_UTC = Date.UTC(2027, 0, 1);
+const COMMUNITY_ARTIST_ACCESS_END_DATE = null;
 
 function trialIsActive(trial_ends_at, now = new Date()) {
   return !!trial_ends_at && new Date(trial_ends_at) > now;
 }
 
 function communityArtistAccessIsActive(now = new Date()) {
-  return now.getTime() < COMMUNITY_ARTIST_ACCESS_END_UTC;
+  return true;
 }
 
 function getArtistAccessState(userLike, now = new Date()) {
