@@ -94,7 +94,7 @@ const Artist = {
 
     const pastEvents = artist.profile_type === 'venue'
       ? await knex('events')
-          .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'genre', 'poster', 'slug')
+          .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'genre', 'poster', 'slug', 'source', 'source_label')
           .where({ is_approved: true })
           .andWhere(applyProfileEventMatch)
           .andWhere('date', '<', today)
@@ -137,7 +137,9 @@ const Artist = {
         'poster',
         'website_link',
         'ticket_price',
-        'slug'
+        'slug',
+        'source',
+        'source_label'
       )
       .where({ is_approved: true })
       .andWhere(function() {

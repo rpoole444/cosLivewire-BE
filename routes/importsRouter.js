@@ -4,7 +4,7 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
-const { normalizeRegion, inferRegionFromText } = require('../utils/regions');
+const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
 const slugify = require('../utils/slugify');
 
@@ -16,6 +16,14 @@ const config = require('../knexfile')[environment];
 const knex = require('knex')(config);
 
 const importsRouter = express.Router();
+
+const SOURCE_CONFIG = {
+  moondog: {
+    label: 'Provided by Moondog',
+    defaultRegion: DEFAULT_REGION,
+    defaultPoster: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
+  },
+};
 
 const normalizeInsertedId = (insertResult) => {
   if (!Array.isArray(insertResult)) return insertResult;
@@ -33,6 +41,71 @@ const countWarnings = (events) => {
   }, 0);
 };
 
+const appendWarning = (event, warning) => {
+  const warnings = Array.isArray(event.parse_warnings) ? [...event.parse_warnings] : [];
+  if (!warnings.includes(warning)) warnings.push(warning);
+  return {
+    ...event,
+    parse_warnings: warnings,
+  };
+};
+
+const getDuplicateRejectedRows = async (source, parsedEvents) => {
+  const fingerprints = parsedEvents
+    .map((event) => event.fingerprint)
+    .filter(Boolean);
+
+  if (!fingerprints.length) return new Map();
+
+  const existingEvents = await knex('events')
+    .select('id', 'source_fingerprint')
+    .where({ source })
+    .whereIn('source_fingerprint', fingerprints)
+    .catch((error) => {
+      if (error?.code === '42703') {
+        return [];
+      }
+      throw error;
+    });
+
+  const existingImportEvents = await knex('import_events')
+    .select('id', 'fingerprint', 'promoted_event_id')
+    .where({ source })
+    .whereIn('fingerprint', fingerprints)
+    .andWhere(function() {
+      this.whereIn('status', ['pending', 'accepted'])
+        .orWhereNotNull('promoted_event_id');
+    });
+
+  const rejected = new Map();
+  const eventFingerprints = new Set(existingEvents.map((event) => event.source_fingerprint));
+  const importFingerprints = new Set(existingImportEvents.map((event) => event.fingerprint));
+  const seenInThisBatch = new Set();
+
+  parsedEvents.forEach((event, index) => {
+    if (!event.fingerprint) return;
+
+    if (eventFingerprints.has(event.fingerprint)) {
+      rejected.set(index, 'duplicate_existing_event');
+      return;
+    }
+
+    if (importFingerprints.has(event.fingerprint)) {
+      rejected.set(index, 'duplicate_existing_import');
+      return;
+    }
+
+    if (seenInThisBatch.has(event.fingerprint)) {
+      rejected.set(index, 'duplicate_in_batch');
+      return;
+    }
+
+    seenInThisBatch.add(event.fingerprint);
+  });
+
+  return rejected;
+};
+
 importsRouter.post('/moondog', async (req, res) => {
   try {
     const { raw_text } = req.body;
@@ -48,13 +121,25 @@ importsRouter.post('/moondog', async (req, res) => {
       console.warn('promoter_unassigned');
     }
 
+    const source = 'moondog';
     const parsedEvents = parseMoondogCalendar(raw_text);
-    const warningCount = countWarnings(parsedEvents);
+    const duplicateRejectedRows = await getDuplicateRejectedRows(source, parsedEvents);
+    const sourceConfig = SOURCE_CONFIG[source] || {};
+    const stagedEvents = parsedEvents.map((event, index) => {
+      const duplicateWarning = duplicateRejectedRows.get(index);
+      const eventWithDefaults = {
+        ...event,
+        region: event.region || sourceConfig.defaultRegion || DEFAULT_REGION,
+      };
+
+      return duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults;
+    });
+    const warningCount = countWarnings(stagedEvents);
 
     const batchId = await knex.transaction(async (trx) => {
       const insertedBatch = await trx('import_batches')
         .insert({
-          source: 'moondog',
+          source,
           raw_text,
           created_by_user_id: req.user?.id || null,
         })
@@ -62,16 +147,17 @@ importsRouter.post('/moondog', async (req, res) => {
 
       const resolvedBatchId = normalizeInsertedId(insertedBatch);
 
-      const rows = parsedEvents.map((event) => ({
+      const rows = stagedEvents.map((event, index) => ({
         batch_id: resolvedBatchId,
-        status: 'pending',
+        status: duplicateRejectedRows.has(index) ? 'rejected' : 'pending',
         promoter_id: promoterId,
-        source: 'moondog',
+        source,
         venue_name: event.venue_name,
         artist_display: event.artist_display,
         start_at: event.start_at,
         date: event.date,
         start_time: event.start_time,
+        region: event.region,
         raw_block: event.raw_block,
         parse_warnings: JSON.stringify(event.parse_warnings || []),
         fingerprint: event.fingerprint,
@@ -168,10 +254,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         return { promoted_count: 0, skipped_count: totalCount, batch_id: batchId };
       }
 
-      const defaultPosters = {
-        // Apply defaults only during promotion, and only for trusted sources.
-        moondog: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
-      };
+      const sourceConfig = SOURCE_CONFIG[source] || {};
 
       const normalizeTimeParts = (value) => {
         const parts = String(value).trim().split(':').map((part) => part.padStart(2, '0'));
@@ -197,6 +280,9 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         ].join(':');
       };
 
+      let promotedCount = 0;
+      let duplicateSkippedCount = 0;
+
       for (const event of acceptedEvents) {
         // Use literal local date/time from the import record; no timezone conversion here.
         const fallbackTiming = getDenverDateTimeParts(event.start_at);
@@ -220,13 +306,36 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         const normalizedPoster = event.poster && String(event.poster).trim();
         const poster = normalizedPoster
           ? normalizedPoster
-          : (defaultPosters[source] || null);
+          : (sourceConfig.defaultPoster || null);
         const venueProfileId = await findVenueProfileIdByInput(trx, {
           venueName: event.venue_name,
         });
 
         const title = event.title || event.artist_display || 'Untitled Event';
         const slug = await generateUniqueEventSlug(trx, title, reservedSlugs);
+        const sourceFingerprint = event.fingerprint || null;
+
+        if (sourceFingerprint) {
+          const existingEvent = await trx('events')
+            .select('id')
+            .where({ source, source_fingerprint: sourceFingerprint })
+            .first();
+
+          if (existingEvent) {
+            duplicateSkippedCount += 1;
+            await trx('import_events')
+              .where({ id: event.id })
+              .update({
+                status: 'rejected',
+                promoted_event_id: existingEvent.id,
+                parse_warnings: JSON.stringify([
+                  ...parseWarningsField(event.parse_warnings),
+                  'duplicate_existing_event',
+                ]),
+              });
+            continue;
+          }
+        }
 
         const rows = await trx('events')
           .insert({
@@ -239,7 +348,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             genre: event.genre || null,
             region: normalizeRegion(
               event.region,
-              inferRegionFromText(event.city, event.location, event.address, event.venue_name)
+              sourceConfig.defaultRegion || inferRegionFromText(event.city, event.location, event.address, event.venue_name)
             ),
             ticket_price: null,
             age_restriction: null,
@@ -252,10 +361,15 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             start_time: finalStartTime,
             end_time: finalEndTime,
             slug,
+            source,
+            source_label: sourceConfig.label || null,
+            source_fingerprint: sourceFingerprint,
+            source_import_event_id: event.id,
           })
           .returning('id');
 
         const promotedEventId = Array.isArray(rows) ? rows[0]?.id || rows[0] : rows;
+        promotedCount += 1;
 
         await trx('import_events')
           .where({ id: event.id })
@@ -270,8 +384,9 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         });
 
       return {
-        promoted_count: acceptedEvents.length,
-        skipped_count: totalCount - acceptedEvents.length,
+        promoted_count: promotedCount,
+        skipped_count: totalCount - promotedCount,
+        duplicate_skipped_count: duplicateSkippedCount,
         batch_id: batchId,
       };
     });
