@@ -127,10 +127,16 @@ artistRouter.get('/public-list', async (req, res) => {
 
 // GET /api/artists/pending
 artistRouter.get('/pending', async (req, res) => {
+  if (!req.isAuthenticated?.() || !req.user?.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
   try {
     const pendingArtists = await knex('artists')
       .where({ is_approved: false })
-      .whereNull('deleted_at');
+      .whereNull('deleted_at')
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc');
 
     console.log('Pending artists fetched:', pendingArtists.length, pendingArtists.map(a => a.slug));
 
