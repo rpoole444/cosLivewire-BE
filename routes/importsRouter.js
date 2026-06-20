@@ -2,6 +2,7 @@ const express = require('express');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
+const customParseFormat = require('dayjs/plugin/customParseFormat');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
@@ -10,6 +11,7 @@ const slugify = require('../utils/slugify');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+dayjs.extend(customParseFormat);
 
 const environment = process.env.NODE_ENV || 'development';
 const config = require('../knexfile')[environment];
@@ -217,6 +219,12 @@ const parseWarningsField = (value) => {
   return [];
 };
 
+const hasDuplicateWarning = (event) => {
+  return parseWarningsField(event.parse_warnings).some((warning) =>
+    ['duplicate_existing_event', 'duplicate_existing_import', 'duplicate_in_batch'].includes(warning)
+  );
+};
+
 const getDenverDateTimeParts = (value) => {
   if (!value) return {};
   const parsed = dayjs(value).tz('America/Denver');
@@ -225,6 +233,21 @@ const getDenverDateTimeParts = (value) => {
     date: parsed.format('YYYY-MM-DD'),
     start_time: parsed.format('HH:mm:ss'),
   };
+};
+
+const normalizeImportTime = (value) => {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  const parsed = dayjs(trimmed, ['HH:mm:ss', 'HH:mm', 'h:mm A', 'h A'], true);
+  if (!parsed.isValid()) return null;
+  return parsed.format('HH:mm:ss');
+};
+
+const normalizeImportDate = (value) => {
+  if (!value) return null;
+  const parsed = dayjs(String(value).trim(), ['YYYY-MM-DD', 'M/D/YYYY', 'MM/DD/YYYY'], true);
+  if (!parsed.isValid()) return null;
+  return parsed.format('YYYY-MM-DD');
 };
 
 const generateUniqueEventSlug = async (trx, title, reservedSlugs) => {
@@ -529,6 +552,169 @@ importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, 
     });
   } catch (error) {
     console.error('Error rejecting import event:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
+importsRouter.post('/:source/:batchId/events/bulk', requireAdmin, async (req, res) => {
+  try {
+    const { source } = req.params;
+    const batchId = Number(req.params.batchId);
+    const { action } = req.body || {};
+
+    if (!source || !Number.isInteger(batchId)) {
+      return res.status(400).json({ message: 'Invalid source or batchId' });
+    }
+
+    const supportedActions = ['accept_clean_pending', 'reject_duplicate_pending', 'reject_all_pending'];
+    if (!supportedActions.includes(action)) {
+      return res.status(400).json({ message: 'Unsupported bulk import action.' });
+    }
+
+    const result = await knex.transaction(async (trx) => {
+      const batch = await trx('import_batches')
+        .where({ id: batchId, source })
+        .first();
+
+      if (!batch) return { error: 'batch_not_found' };
+      if (batch.status === 'completed') return { error: 'batch_already_completed' };
+
+      const pendingEvents = await trx('import_events')
+        .where({ batch_id: batchId, source, status: 'pending' })
+        .whereNull('promoted_event_id')
+        .orderBy('id');
+
+      const selectedEvents = pendingEvents.filter((event) => {
+        const isDuplicate = hasDuplicateWarning(event);
+        if (action === 'accept_clean_pending') return !isDuplicate;
+        if (action === 'reject_duplicate_pending') return isDuplicate;
+        return true;
+      });
+
+      if (!selectedEvents.length) {
+        return { updatedCount: 0, events: [] };
+      }
+
+      const ids = selectedEvents.map((event) => event.id);
+      const nextStatus = action === 'accept_clean_pending' ? 'accepted' : 'rejected';
+      const updatePayload = nextStatus === 'accepted'
+        ? {
+            status: nextStatus,
+            accepted_by: req.user?.id || null,
+            accepted_at: trx.fn.now(),
+            rejected_by: null,
+            rejected_at: null,
+          }
+        : {
+            status: nextStatus,
+            accepted_by: null,
+            accepted_at: null,
+            rejected_by: req.user?.id || null,
+            rejected_at: trx.fn.now(),
+          };
+
+      const updatedEvents = await trx('import_events')
+        .whereIn('id', ids)
+        .update(updatePayload)
+        .returning('*');
+
+      return {
+        updatedCount: updatedEvents.length,
+        events: updatedEvents,
+      };
+    });
+
+    if (result.error === 'batch_not_found') {
+      return res.status(404).json({ message: 'Import batch not found' });
+    }
+    if (result.error === 'batch_already_completed') {
+      return res.status(400).json({ message: 'Import batch already completed' });
+    }
+
+    return res.json({
+      updatedCount: result.updatedCount,
+      events: result.events.map((event) => ({
+        ...event,
+        parse_warnings: parseWarningsField(event.parse_warnings),
+      })),
+    });
+  } catch (error) {
+    console.error('Error bulk updating import events:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
+importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (req, res) => {
+  try {
+    const { source } = req.params;
+    const batchId = Number(req.params.batchId);
+    const eventId = Number(req.params.eventId);
+
+    if (!source || !Number.isInteger(batchId) || !Number.isInteger(eventId)) {
+      return res.status(400).json({ message: 'Invalid source, batchId, or eventId' });
+    }
+
+    const {
+      date,
+      time,
+      start_time,
+      venue,
+      venue_name,
+      artist_display,
+      title,
+      region,
+    } = req.body || {};
+
+    const updatePayload = {};
+    const nextDate = normalizeImportDate(date);
+    const nextStartTime = normalizeImportTime(time || start_time);
+    const nextVenueName = venue_name ?? venue;
+
+    if (date !== undefined) {
+      if (!nextDate) return res.status(400).json({ message: 'Use date format YYYY-MM-DD.' });
+      updatePayload.date = nextDate;
+    }
+
+    if (time !== undefined || start_time !== undefined) {
+      if (!nextStartTime) return res.status(400).json({ message: 'Use time format HH:MM or h:mm AM.' });
+      updatePayload.start_time = nextStartTime;
+    }
+
+    if (nextVenueName !== undefined) updatePayload.venue_name = String(nextVenueName).trim();
+    if (artist_display !== undefined) updatePayload.artist_display = String(artist_display).trim();
+    if (title !== undefined) updatePayload.title = String(title).trim();
+    if (region !== undefined) updatePayload.region = normalizeRegion(region, DEFAULT_REGION);
+
+    const updatedEvent = await knex.transaction(async (trx) => {
+      const event = await trx('import_events')
+        .where({ id: eventId, batch_id: batchId, source })
+        .first();
+
+      if (!event) return null;
+      if (event.promoted_event_id) return { error: 'Event has already been promoted' };
+      if (!Object.keys(updatePayload).length) return event;
+
+      const rows = await trx('import_events')
+        .where({ id: eventId })
+        .update(updatePayload)
+        .returning('*');
+
+      return rows[0];
+    });
+
+    if (!updatedEvent) {
+      return res.status(404).json({ message: 'Import event not found' });
+    }
+    if (updatedEvent.error) {
+      return res.status(400).json({ message: updatedEvent.error });
+    }
+
+    return res.json({
+      ...updatedEvent,
+      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
+    });
+  } catch (error) {
+    console.error('Error updating import event:', error);
     return res.status(500).json({ message: 'Internal server error.' });
   }
 });
