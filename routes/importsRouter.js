@@ -6,6 +6,7 @@ const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { requireAdmin } = require('../middleware/auth');
 const { normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
+const slugify = require('../utils/slugify');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -118,6 +119,20 @@ const getDenverDateTimeParts = (value) => {
   };
 };
 
+const generateUniqueEventSlug = async (trx, title, reservedSlugs) => {
+  const baseSlug = slugify(title || 'untitled-event') || 'untitled-event';
+  let candidate = baseSlug;
+  let suffix = 1;
+
+  while (reservedSlugs.has(candidate) || await trx('events').where({ slug: candidate }).first('id')) {
+    candidate = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+
+  reservedSlugs.add(candidate);
+  return candidate;
+};
+
 // Promote accepted import events into public events (all-or-nothing).
 importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) => {
   try {
@@ -166,6 +181,8 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         return { hours, minutes, seconds };
       };
 
+      const reservedSlugs = new Set();
+
       const addTwoHours = (timeValue) => {
         const { hours, minutes, seconds } = normalizeTimeParts(timeValue);
         const totalSeconds = (hours * 3600) + (minutes * 60) + seconds + (2 * 3600);
@@ -208,10 +225,13 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           venueName: event.venue_name,
         });
 
+        const title = event.title || event.artist_display || 'Untitled Event';
+        const slug = await generateUniqueEventSlug(trx, title, reservedSlugs);
+
         const rows = await trx('events')
           .insert({
             user_id: event.user_id || batch.created_by_user_id || null,
-            title: event.title || event.artist_display || 'Untitled Event',
+            title,
             description: event.description || '',
             location: event.location || event.venue_name || '',
             address: event.address || '',
@@ -224,13 +244,14 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             ticket_price: null,
             age_restriction: null,
             website_link: null,
-            is_approved: true,
+            is_approved: false,
             venue_name: event.venue_name || null,
             venue_profile_id: venueProfileId,
             website: event.website || null,
             poster,
             start_time: finalStartTime,
             end_time: finalEndTime,
+            slug,
           })
           .returning('id');
 
