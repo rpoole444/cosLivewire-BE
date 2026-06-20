@@ -86,7 +86,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     if (isNaN(ticket_price)) ticket_price = null;
     const slug = providedSlug || await generateUniqueSlug(title);
     const resolvedVenueProfileId = await findVenueProfileIdByInput(knex, {
-      venueProfileId: venue_profile_id || event.venue_profile_id,
+      venueProfileId: venue_profile_id,
       venueName: venue_name,
     });
 
