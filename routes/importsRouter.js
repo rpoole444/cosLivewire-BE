@@ -20,6 +20,7 @@ const importsRouter = express.Router();
 const SOURCE_CONFIG = {
   moondog: {
     label: 'Provided by Moondog',
+    ownerEmail: 'mike@moondogmusicshop.com',
     defaultRegion: DEFAULT_REGION,
     defaultPoster: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
   },
@@ -104,6 +105,27 @@ const getDuplicateRejectedRows = async (source, parsedEvents) => {
   });
 
   return rejected;
+};
+
+const resolveSourceOwnerUserId = async (db, source, batch) => {
+  const sourceConfig = SOURCE_CONFIG[source] || {};
+  const ownerEmail = String(sourceConfig.ownerEmail || '').trim().toLowerCase();
+
+  if (ownerEmail) {
+    const owner = await db('users')
+      .select('id')
+      .whereRaw('LOWER(TRIM(email)) = ?', [ownerEmail])
+      .first();
+
+    if (!owner) {
+      console.warn(`[IMPORT PROMOTE] source owner not found for ${source}: ${ownerEmail}`);
+      return null;
+    }
+
+    return owner.id;
+  }
+
+  return batch?.created_by_user_id || null;
 };
 
 importsRouter.post('/moondog', async (req, res) => {
@@ -255,6 +277,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
       }
 
       const sourceConfig = SOURCE_CONFIG[source] || {};
+      const sourceOwnerUserId = await resolveSourceOwnerUserId(trx, source, batch);
 
       const normalizeTimeParts = (value) => {
         const parts = String(value).trim().split(':').map((part) => part.padStart(2, '0'));
@@ -339,7 +362,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
 
         const rows = await trx('events')
           .insert({
-            user_id: event.user_id || batch.created_by_user_id || null,
+            user_id: event.user_id || sourceOwnerUserId || null,
             title,
             description: event.description || '',
             location: event.location || event.venue_name || '',
