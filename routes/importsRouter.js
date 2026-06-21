@@ -4,7 +4,7 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
-const { requireAdmin } = require('../middleware/auth');
+const { ensureAuth, requireAdmin } = require('../middleware/auth');
 const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
 const slugify = require('../utils/slugify');
@@ -25,6 +25,12 @@ const SOURCE_CONFIG = {
     ownerEmail: 'mike@moondogmusicshop.com',
     defaultRegion: DEFAULT_REGION,
     defaultPoster: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
+  },
+  profile: {
+    label: null,
+    ownerEmail: null,
+    defaultRegion: DEFAULT_REGION,
+    defaultPoster: null,
   },
 };
 
@@ -130,41 +136,81 @@ const resolveSourceOwnerUserId = async (db, source, batch) => {
   return batch?.created_by_user_id || null;
 };
 
-importsRouter.post('/moondog', async (req, res) => {
+const canManageBatch = (req, batch) => (
+  Boolean(req.user?.is_admin) || (
+    batch?.created_by_user_id &&
+    req.user?.id &&
+    Number(batch.created_by_user_id) === Number(req.user.id)
+  )
+);
+
+const createImportBatch = async (req, res, source) => {
   try {
     const { raw_text, defaults = {} } = req.body;
     if (!raw_text || typeof raw_text !== 'string') {
       return res.status(400).json({ message: 'raw_text is required' });
     }
 
-    const promoterEnv = process.env.MOONDOG_PROMOTER_ID;
+    const sourceConfig = SOURCE_CONFIG[source];
+    if (!sourceConfig) {
+      return res.status(400).json({ message: 'Unsupported import source.' });
+    }
+
+    const promoterEnv = source === 'moondog' ? process.env.MOONDOG_PROMOTER_ID : null;
     const promoterId = promoterEnv && Number.isInteger(Number(promoterEnv))
       ? Number(promoterEnv)
       : null;
-    if (!promoterId) {
+    if (source === 'moondog' && !promoterId) {
       console.warn('promoter_unassigned');
     }
 
-    const source = 'moondog';
     const parsedEvents = parseMoondogCalendar(raw_text);
     const duplicateRejectedRows = await getDuplicateRejectedRows(source, parsedEvents);
-    const sourceConfig = SOURCE_CONFIG[source] || {};
+    const defaultArtistProfileId = parseOptionalProfileId(defaults.artist_profile_id);
     const defaultVenueProfileId = parseOptionalProfileId(defaults.venue_profile_id);
-    let venueDefaults = {
+    let profileDefaults = {
+      artist_profile_id: defaultArtistProfileId,
       venue_profile_id: defaultVenueProfileId,
+      artist_display: cleanOptionalImportText(defaults.artist_display, 255),
       venue_name: cleanOptionalImportText(defaults.venue_name, 255),
       location: cleanOptionalImportText(defaults.location || defaults.venue_name, 255),
       address: cleanOptionalImportText(defaults.address, 255),
       city: cleanOptionalImportText(defaults.city, 255),
       website: cleanOptionalImportText(defaults.website, 255),
+      website_link: cleanOptionalImportText(defaults.website_link, 255),
       age_policy: cleanOptionalImportText(defaults.age_policy, 120),
       poster: cleanOptionalImportText(defaults.poster, 255),
       region: normalizeRegion(defaults.region, sourceConfig.defaultRegion || DEFAULT_REGION),
     };
 
+    if (defaultArtistProfileId) {
+      const artist = await knex('artists')
+        .select('id', 'display_name', 'website', 'profile_image', 'home_region', 'user_id')
+        .where({ id: defaultArtistProfileId, profile_type: 'artist' })
+        .whereNull('deleted_at')
+        .first();
+
+      if (!artist) {
+        return res.status(400).json({ message: 'Selected artist profile was not found.' });
+      }
+      if (!req.user?.is_admin && artist.user_id !== req.user?.id) {
+        return res.status(403).json({ message: 'You can only import with profiles you manage.' });
+      }
+
+      profileDefaults = {
+        ...profileDefaults,
+        artist_profile_id: artist.id,
+        artist_display: profileDefaults.artist_display || artist.display_name || null,
+        website: profileDefaults.website || artist.website || null,
+        website_link: profileDefaults.website_link || profileDefaults.website || artist.website || null,
+        poster: profileDefaults.poster || artist.profile_image || null,
+        region: normalizeRegion(profileDefaults.region, artist.home_region || sourceConfig.defaultRegion || DEFAULT_REGION),
+      };
+    }
+
     if (defaultVenueProfileId) {
       const venue = await knex('artists')
-        .select('id', 'display_name', 'venue_address', 'venue_city', 'website', 'age_policy', 'profile_image', 'home_region')
+        .select('id', 'display_name', 'venue_address', 'venue_city', 'website', 'age_policy', 'profile_image', 'home_region', 'user_id')
         .where({ id: defaultVenueProfileId, profile_type: 'venue' })
         .whereNull('deleted_at')
         .first();
@@ -172,18 +218,22 @@ importsRouter.post('/moondog', async (req, res) => {
       if (!venue) {
         return res.status(400).json({ message: 'Selected venue profile was not found.' });
       }
+      if (!req.user?.is_admin && venue.user_id !== req.user?.id) {
+        return res.status(403).json({ message: 'You can only import with profiles you manage.' });
+      }
 
-      venueDefaults = {
-        ...venueDefaults,
+      profileDefaults = {
+        ...profileDefaults,
         venue_profile_id: venue.id,
-        venue_name: venueDefaults.venue_name || venue.display_name || null,
-        location: venueDefaults.location || venue.display_name || null,
-        address: venueDefaults.address || venue.venue_address || null,
-        city: venueDefaults.city || venue.venue_city || null,
-        website: venueDefaults.website || venue.website || null,
-        age_policy: venueDefaults.age_policy || venue.age_policy || null,
-        poster: venueDefaults.poster || venue.profile_image || null,
-        region: normalizeRegion(venueDefaults.region, venue.home_region || sourceConfig.defaultRegion || DEFAULT_REGION),
+        venue_name: profileDefaults.venue_name || venue.display_name || null,
+        location: profileDefaults.location || venue.display_name || null,
+        address: profileDefaults.address || venue.venue_address || null,
+        city: profileDefaults.city || venue.venue_city || null,
+        website: profileDefaults.website || venue.website || null,
+        website_link: profileDefaults.website_link || profileDefaults.website || venue.website || null,
+        age_policy: profileDefaults.age_policy || venue.age_policy || null,
+        poster: profileDefaults.poster || venue.profile_image || null,
+        region: normalizeRegion(profileDefaults.region, venue.home_region || sourceConfig.defaultRegion || DEFAULT_REGION),
       };
     }
 
@@ -191,15 +241,18 @@ importsRouter.post('/moondog', async (req, res) => {
       const duplicateWarning = duplicateRejectedRows.get(index);
       const eventWithDefaults = {
         ...event,
-        venue_name: event.venue_name || venueDefaults.venue_name,
-        location: event.location || venueDefaults.location || event.venue_name || venueDefaults.venue_name,
-        address: event.address || venueDefaults.address,
-        city: event.city || venueDefaults.city,
-        website: event.website || venueDefaults.website,
-        age_policy: event.age_policy || venueDefaults.age_policy,
-        poster: event.poster || venueDefaults.poster,
-        venue_profile_id: event.venue_profile_id || venueDefaults.venue_profile_id,
-        region: event.region || venueDefaults.region || sourceConfig.defaultRegion || DEFAULT_REGION,
+        artist_display: event.artist_display || profileDefaults.artist_display,
+        artist_profile_id: event.artist_profile_id || profileDefaults.artist_profile_id,
+        venue_name: event.venue_name || profileDefaults.venue_name,
+        location: event.location || profileDefaults.location || event.venue_name || profileDefaults.venue_name,
+        address: event.address || profileDefaults.address,
+        city: event.city || profileDefaults.city,
+        website: event.website || profileDefaults.website,
+        website_link: event.website_link || profileDefaults.website_link || event.website || profileDefaults.website,
+        age_policy: event.age_policy || profileDefaults.age_policy,
+        poster: event.poster || profileDefaults.poster,
+        venue_profile_id: event.venue_profile_id || profileDefaults.venue_profile_id,
+        region: event.region || profileDefaults.region || sourceConfig.defaultRegion || DEFAULT_REGION,
       };
 
       return duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults;
@@ -223,7 +276,9 @@ importsRouter.post('/moondog', async (req, res) => {
         promoter_id: promoterId,
         source,
         venue_name: event.venue_name,
+        title: event.title || null,
         artist_display: event.artist_display,
+        artist_profile_id: event.artist_profile_id || null,
         start_at: event.start_at,
         date: event.date,
         start_time: event.start_time,
@@ -233,6 +288,9 @@ importsRouter.post('/moondog', async (req, res) => {
         address: event.address || null,
         city: event.city || null,
         website: event.website || null,
+        website_link: event.website_link || null,
+        description: event.description || null,
+        genre: event.genre || null,
         age_policy: event.age_policy || null,
         poster: event.poster || null,
         raw_block: event.raw_block,
@@ -256,7 +314,10 @@ importsRouter.post('/moondog', async (req, res) => {
     console.error('Error creating import batch:', error);
     return res.status(500).json({ message: 'Internal server error.' });
   }
-});
+};
+
+importsRouter.post('/moondog', requireAdmin, (req, res) => createImportBatch(req, res, 'moondog'));
+importsRouter.post('/profile', ensureAuth, (req, res) => createImportBatch(req, res, 'profile'));
 
 const parseWarningsField = (value) => {
   if (value == null) return [];
@@ -464,7 +525,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             ),
             ticket_price: null,
             age_restriction: event.age_policy || null,
-            website_link: null,
+            website_link: event.website_link || null,
             is_approved: false,
             venue_name: event.venue_name || null,
             venue_profile_id: venueProfileId,
@@ -519,7 +580,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
 });
 
 // Moderation endpoints for staged imports (no promotion to events here).
-importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, res) => {
+importsRouter.post('/:source/events/:eventId/accept', ensureAuth, async (req, res) => {
   try {
     const { source } = req.params;
     const eventId = Number(req.params.eventId);
@@ -535,6 +596,11 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
       if (!event) {
         return null;
       }
+
+      const batch = await trx('import_batches')
+        .where({ id: event.batch_id, source })
+        .first();
+      if (!canManageBatch(req, batch)) return { error: 'Forbidden', status: 403 };
 
       if (event.promoted_event_id) {
         return { error: 'Event has already been promoted' };
@@ -558,6 +624,9 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
       return res.status(404).json({ message: 'Import event not found' });
     }
     if (updatedEvent.error) {
+      if (updatedEvent.status === 403) {
+        return res.status(403).json({ message: updatedEvent.error });
+      }
       return res.status(400).json({ message: updatedEvent.error });
     }
 
@@ -571,7 +640,7 @@ importsRouter.post('/:source/events/:eventId/accept', requireAdmin, async (req, 
   }
 });
 
-importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, res) => {
+importsRouter.post('/:source/events/:eventId/reject', ensureAuth, async (req, res) => {
   try {
     const { source } = req.params;
     const eventId = Number(req.params.eventId);
@@ -587,6 +656,11 @@ importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, 
       if (!event) {
         return null;
       }
+
+      const batch = await trx('import_batches')
+        .where({ id: event.batch_id, source })
+        .first();
+      if (!canManageBatch(req, batch)) return { error: 'Forbidden', status: 403 };
 
       if (event.promoted_event_id) {
         return { error: 'Event has already been promoted' };
@@ -610,6 +684,9 @@ importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, 
       return res.status(404).json({ message: 'Import event not found' });
     }
     if (updatedEvent.error) {
+      if (updatedEvent.status === 403) {
+        return res.status(403).json({ message: updatedEvent.error });
+      }
       return res.status(400).json({ message: updatedEvent.error });
     }
 
@@ -623,7 +700,7 @@ importsRouter.post('/:source/events/:eventId/reject', requireAdmin, async (req, 
   }
 });
 
-importsRouter.post('/:source/:batchId/events/bulk', requireAdmin, async (req, res) => {
+importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res) => {
   try {
     const { source } = req.params;
     const batchId = Number(req.params.batchId);
@@ -644,6 +721,7 @@ importsRouter.post('/:source/:batchId/events/bulk', requireAdmin, async (req, re
         .first();
 
       if (!batch) return { error: 'batch_not_found' };
+      if (!canManageBatch(req, batch)) return { error: 'forbidden' };
       if (batch.status === 'completed') return { error: 'batch_already_completed' };
 
       const pendingEvents = await trx('import_events')
@@ -694,6 +772,9 @@ importsRouter.post('/:source/:batchId/events/bulk', requireAdmin, async (req, re
     if (result.error === 'batch_not_found') {
       return res.status(404).json({ message: 'Import batch not found' });
     }
+    if (result.error === 'forbidden') {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
     if (result.error === 'batch_already_completed') {
       return res.status(400).json({ message: 'Import batch already completed' });
     }
@@ -711,7 +792,7 @@ importsRouter.post('/:source/:batchId/events/bulk', requireAdmin, async (req, re
   }
 });
 
-importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (req, res) => {
+importsRouter.patch('/:source/:batchId/events/:eventId', ensureAuth, async (req, res) => {
   try {
     const { source } = req.params;
     const batchId = Number(req.params.batchId);
@@ -732,6 +813,11 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
       venue_profile_id,
       age_policy,
       title,
+      description,
+      website,
+      website_link,
+      poster,
+      genre,
       region,
     } = req.body || {};
 
@@ -753,6 +839,11 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
     if (nextVenueName !== undefined) updatePayload.venue_name = String(nextVenueName).trim();
     if (artist_display !== undefined) updatePayload.artist_display = String(artist_display).trim();
     if (title !== undefined) updatePayload.title = String(title).trim();
+    if (description !== undefined) updatePayload.description = cleanOptionalImportText(description, 3000);
+    if (website !== undefined) updatePayload.website = cleanOptionalImportText(website, 255);
+    if (website_link !== undefined) updatePayload.website_link = cleanOptionalImportText(website_link, 255);
+    if (poster !== undefined) updatePayload.poster = cleanOptionalImportText(poster, 255);
+    if (genre !== undefined) updatePayload.genre = cleanOptionalImportText(genre, 255);
     if (age_policy !== undefined) updatePayload.age_policy = cleanOptionalImportText(age_policy, 120);
     if (region !== undefined) updatePayload.region = normalizeRegion(region, DEFAULT_REGION);
 
@@ -768,25 +859,35 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
         .first();
 
       if (!event) return null;
+      const batch = await trx('import_batches')
+        .where({ id: batchId, source })
+        .first();
+      if (!canManageBatch(req, batch)) return { error: 'Forbidden', status: 403 };
       if (event.promoted_event_id) return { error: 'Event has already been promoted' };
       if (!Object.keys(updatePayload).length) return event;
 
       if (nextArtistProfileId) {
         const artistProfile = await trx('artists')
-          .select('id')
+          .select('id', 'user_id')
           .where({ id: nextArtistProfileId, profile_type: 'artist' })
           .whereNull('deleted_at')
           .first();
         if (!artistProfile) return { error: 'Invalid artist profile' };
+        if (!req.user?.is_admin && artistProfile.user_id !== req.user?.id) {
+          return { error: 'Forbidden', status: 403 };
+        }
       }
 
       if (nextVenueProfileId) {
         const venueProfile = await trx('artists')
-          .select('id')
+          .select('id', 'user_id')
           .where({ id: nextVenueProfileId, profile_type: 'venue' })
           .whereNull('deleted_at')
           .first();
         if (!venueProfile) return { error: 'Invalid venue profile' };
+        if (!req.user?.is_admin && venueProfile.user_id !== req.user?.id) {
+          return { error: 'Forbidden', status: 403 };
+        }
       }
 
       const rows = await trx('import_events')
@@ -801,6 +902,9 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
       return res.status(404).json({ message: 'Import event not found' });
     }
     if (updatedEvent.error) {
+      if (updatedEvent.status === 403) {
+        return res.status(403).json({ message: updatedEvent.error });
+      }
       return res.status(400).json({ message: updatedEvent.error });
     }
 
@@ -814,26 +918,31 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
   }
 });
 
-importsRouter.get('/moondog/:batchId', async (req, res) => {
+importsRouter.get('/:source/:batchId', ensureAuth, async (req, res) => {
   try {
+    const { source } = req.params;
     const batchId = Number(req.params.batchId);
-    if (!Number.isInteger(batchId)) {
-      return res.status(400).json({ message: 'batchId must be an integer' });
+    if (!SOURCE_CONFIG[source] || !Number.isInteger(batchId)) {
+      return res.status(400).json({ message: 'Invalid source or batchId' });
     }
 
     const batch = await knex('import_batches')
-      .where({ id: batchId, source: 'moondog' })
+      .where({ id: batchId, source })
       .first();
     if (!batch) {
       return res.status(404).json({ message: 'Import batch not found' });
     }
+    if (!canManageBatch(req, batch)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
 
     const events = await knex('import_events')
-      .where({ batch_id: batchId, source: 'moondog' })
+      .where({ batch_id: batchId, source })
       .orderBy('id');
 
     return res.json({
       batch,
+      canPromote: Boolean(req.user?.is_admin),
       events: events.map((event) => ({
         ...event,
         parse_warnings: parseWarningsField(event.parse_warnings),

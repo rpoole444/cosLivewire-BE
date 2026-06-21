@@ -10,6 +10,7 @@ dayjs.extend(timezone);
 
 const DAY_HEADER_REGEX = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+([A-Za-z]+)\s+(\d{1,2})/i;
 const TIME_REGEX = /(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)/gi;
+const METADATA_REGEX = /^([A-Za-z][A-Za-z\s/_-]{1,30}):\s*(.+)$/;
 const DEBUG_PARSER = process.env.DEBUG_PARSER === 'true';
 
 const debugLog = (message) => {
@@ -292,6 +293,55 @@ const parseVenueLine = (line, date) => {
   return events;
 };
 
+const applyMetadata = (events, line) => {
+  const match = line.match(METADATA_REGEX);
+  if (!match || !events.length) return false;
+
+  const key = normalizeText(match[1]).replace(/[\s/_-]+/g, '_');
+  const value = match[2].trim();
+  if (!value) return true;
+
+  events.forEach((event) => {
+    event.raw_block = `${event.raw_block}\n${line}`;
+
+    if (['title', 'event_title', 'show_title'].includes(key)) {
+      event.title = value;
+      return;
+    }
+    if (['description', 'desc', 'notes', 'public_notes'].includes(key)) {
+      event.description = event.description ? `${event.description}\n${value}` : value;
+      return;
+    }
+    if (['poster', 'image', 'photo', 'flyer'].includes(key)) {
+      event.poster = value;
+      return;
+    }
+    if (['website', 'link', 'show_link'].includes(key)) {
+      event.website = value;
+      if (!event.website_link) event.website_link = value;
+      return;
+    }
+    if (['ticket', 'tickets', 'ticket_link', 'rsvp'].includes(key)) {
+      event.website_link = value;
+      if (!event.website) event.website = value;
+      return;
+    }
+    if (['region', 'area'].includes(key)) {
+      event.region = value;
+      return;
+    }
+    if (['age', 'ages', 'age_policy', 'age_restriction'].includes(key)) {
+      event.age_policy = value;
+      return;
+    }
+    if (['genre', 'genres', 'tags'].includes(key)) {
+      event.genre = value;
+    }
+  });
+
+  return true;
+};
+
 const parseMoondogCalendar = (rawText) => {
   if (!rawText || typeof rawText !== 'string') return [];
 
@@ -302,18 +352,26 @@ const parseMoondogCalendar = (rawText) => {
 
   const parsedEvents = [];
   let currentDate = null;
+  let lastParsedEvents = [];
 
   lines.forEach((line) => {
     const headerDate = parseDayHeader(line);
     if (headerDate) {
       currentDate = headerDate;
+      lastParsedEvents = [];
       return;
     }
 
     if (!currentDate) return;
 
     const cleanedLine = line.replace(/^[-*]\s+/, '');
-    parsedEvents.push(...parseVenueLine(cleanedLine, currentDate));
+    if (applyMetadata(lastParsedEvents, cleanedLine)) return;
+
+    const lineEvents = parseVenueLine(cleanedLine, currentDate);
+    if (lineEvents.length) {
+      parsedEvents.push(...lineEvents);
+      lastParsedEvents = lineEvents;
+    }
   });
 
   return parsedEvents;
