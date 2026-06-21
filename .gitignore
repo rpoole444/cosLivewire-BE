@@ -2,3 +2,4 @@
 .env.production
 .vercel
 .env.development
+reports/

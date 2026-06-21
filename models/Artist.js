@@ -5,6 +5,7 @@ const isInTrial = require('../utils/isInTrial');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
+const { attachEventImageFieldsToMany } = require('../utils/eventImages');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -23,19 +24,21 @@ const selectPublicEventFields = [
   'events.slug',
   'events.source',
   'events.source_label',
+  'venue_profile.profile_image as venue_profile_image',
+  'venue_profile.display_name as venue_profile_display_name',
 ];
 
 const applyProfileEventMatch = (builder, artist) => {
   if (artist.profile_type === 'venue') {
     builder
-      .where({ venue_profile_id: artist.id })
+      .where({ 'events.venue_profile_id': artist.id })
       .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
     return;
   }
 
   builder
-    .where({ artist_profile_id: artist.id })
-    .orWhere({ user_id: artist.user_id });
+    .where({ 'events.artist_profile_id': artist.id })
+    .orWhere({ 'events.user_id': artist.user_id });
 };
 
 const Artist = {
@@ -106,23 +109,40 @@ const Artist = {
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const events = await knex('events')
-      .where({ is_approved: true })
+      .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+      .select('events.*', 'venue_profile.profile_image as venue_profile_image', 'venue_profile.display_name as venue_profile_display_name')
+      .where({ 'events.is_approved': true })
       .andWhere(function() {
         applyProfileEventMatch(this, artist);
       })
-      .andWhere('date', '>=', today)
-      .orderBy('date');
+      .andWhere('events.date', '>=', today)
+      .orderBy('events.date');
 
     const pastEvents = artist.profile_type === 'venue'
       ? await knex('events')
-          .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'genre', 'poster', 'slug', 'source', 'source_label')
-          .where({ is_approved: true })
+          .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+          .select(
+            'events.id',
+            'events.title',
+            'events.date',
+            'events.start_time',
+            'events.venue_name',
+            'events.location',
+            'events.genre',
+            'events.poster',
+            'events.slug',
+            'events.source',
+            'events.source_label',
+            'venue_profile.profile_image as venue_profile_image',
+            'venue_profile.display_name as venue_profile_display_name'
+          )
+          .where({ 'events.is_approved': true })
           .andWhere(function() {
             applyProfileEventMatch(this, artist);
           })
-          .andWhere('date', '<', today)
-          .orderBy('date', 'desc')
-          .orderBy('start_time', 'desc')
+          .andWhere('events.date', '<', today)
+          .orderBy('events.date', 'desc')
+          .orderBy('events.start_time', 'desc')
           .limit(12)
       : [];
 
@@ -132,8 +152,8 @@ const Artist = {
 
     return {
       ...artist,
-      events,
-      past_events: pastEvents,
+      events: attachEventImageFieldsToMany(events),
+      past_events: attachEventImageFieldsToMany(pastEvents),
       trial_expired: isTrialExpired,
     };
   },
@@ -150,6 +170,7 @@ const Artist = {
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const mode = options.mode === 'top-picks' ? 'top-picks' : 'upcoming';
     const query = knex('events')
+      .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
       .select(selectPublicEventFields)
       .where({ 'events.is_approved': true })
       .andWhere('events.date', '>=', today);
@@ -179,7 +200,7 @@ const Artist = {
       profile_type: artist.profile_type || 'artist',
       home_region: artist.home_region,
       mode,
-      events: upcomingEvents,
+      events: attachEventImageFieldsToMany(upcomingEvents),
     };
   },
 
@@ -194,6 +215,7 @@ const Artist = {
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const events = await knex('events')
+      .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
       .leftJoin('profile_featured_events as pfe', function() {
         this.on('pfe.event_id', '=', 'events.id')
           .andOn('pfe.profile_id', '=', knex.raw('?', [artist.id]));
@@ -213,7 +235,7 @@ const Artist = {
 
     return {
       profile: artist,
-      events,
+      events: attachEventImageFieldsToMany(events),
     };
   },
 

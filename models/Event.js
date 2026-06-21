@@ -5,6 +5,7 @@ const knex = require('knex')(config);
 const { v4: uuidv4 } = require('uuid');
 const slugify = require('../utils/slugify');
 const { REGION_ALL, REGION_SLUGS } = require('../utils/regions');
+const { attachEventImageFields, attachEventImageFieldsToMany } = require('../utils/eventImages');
 
  // Adjust the path as necessary for your project structure
 
@@ -31,11 +32,14 @@ const getEventsForReview = async () => {
   // 1) Perform a left join on "users" to include user fields
   const events = await knex('events')
     .leftJoin('users', 'events.user_id', 'users.id')
+    .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
     .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
     .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .where('events.is_approved', false)
     .select(
       'events.*',
+      'venue_profile.profile_image as venue_profile_image',
+      'venue_profile.display_name as venue_profile_display_name',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -47,7 +51,7 @@ const getEventsForReview = async () => {
     );
 
   // 2) Map over these rows to create a nested "user" object
-  const shapedEvents = events.map((row) => ({
+  const shapedEvents = events.map((row) => attachEventImageFields({
     ...row,
     user: {
       first_name: row.user_first_name,
@@ -87,11 +91,18 @@ const updateEventStatus = (eventId, isApproved) => {
 };
 
 const getAllEvents = async ({ region } = {}) => {
-  const query = knex('events').select('*');
+  const query = knex('events')
+    .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+    .select(
+      'events.*',
+      'venue_profile.profile_image as venue_profile_image',
+      'venue_profile.display_name as venue_profile_display_name'
+    );
   if (region && region !== REGION_ALL && REGION_SLUGS.has(String(region))) {
-    query.where({ region });
+    query.where({ 'events.region': region });
   }
-  return query;
+  const events = await query;
+  return attachEventImageFieldsToMany(events);
 };
 
 const updateEvent = async(eventId, eventData) => {
@@ -104,10 +115,13 @@ const updateEvent = async(eventId, eventData) => {
 const findEventById = async (eventId) => {
   const event = await knex('events')
     .leftJoin('users', 'events.user_id', 'users.id')
+    .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
     .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
     .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .select(
       'events.*',
+      'venue_profile.profile_image as venue_profile_image',
+      'venue_profile.display_name as venue_profile_display_name',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -123,7 +137,7 @@ const findEventById = async (eventId) => {
   if (!event) return null;
 
   // Nest user data
-  return {
+  return attachEventImageFields({
     ...event,
     user: {
       first_name: event.user_first_name,
@@ -138,14 +152,17 @@ const findEventById = async (eventId) => {
       user_id: event.claimed_artist_user_id,
     } : null,
     claimed_by_user_email: event.claimed_by_user_email,
-  };
+  });
 };
 const findBySlug = async (slug) => {
   const event = await knex('events')
+    .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
     .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
     .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .select(
       'events.*',
+      'venue_profile.profile_image as venue_profile_image',
+      'venue_profile.display_name as venue_profile_display_name',
       'claimed_artist.display_name as claimed_artist_display_name',
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
@@ -157,7 +174,7 @@ const findBySlug = async (slug) => {
 
   if (!event) return null;
 
-  return {
+  return attachEventImageFields({
     ...event,
     claimed_artist: event.artist_profile_id ? {
       id: event.artist_profile_id,
@@ -167,7 +184,7 @@ const findBySlug = async (slug) => {
       user_id: event.claimed_artist_user_id,
     } : null,
     claimed_by_user_email: event.claimed_by_user_email,
-  };
+  });
 }
 
 
