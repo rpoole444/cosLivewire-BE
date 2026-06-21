@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "node tests/stripeStatus.test.js",
+    "test": "node tests/stripeStatus.test.js && node tests/eventDuplicateDetection.test.js",
     "check-pro-status": "node scripts/checkProStatus.js",
     "start": "node app.js",
     "migrate": "knex migrate:latest",

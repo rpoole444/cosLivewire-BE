@@ -143,7 +143,10 @@ artistRouter.get('/admin/options', isAdmin, async (req, res) => {
         'venue_state',
         'website',
         'age_policy',
-        'profile_image'
+        'profile_image',
+        'is_shell',
+        'shell_created_by_user_id',
+        'shell_claimed_at'
       )
       .where({ is_approved: true })
       .whereNull('deleted_at')
@@ -699,8 +702,12 @@ artistRouter.post(
           !existingWithSlug.is_approved &&
           !existingWithSlug.is_listed &&
           !existingWithSlug.deleted_at;
+        const claimableShell =
+          existingWithSlug.is_shell &&
+          !existingWithSlug.user_id &&
+          !existingWithSlug.deleted_at;
 
-        if (!reusableOwnDraft) {
+        if (!reusableOwnDraft && !claimableShell) {
           return res.status(409).json({
             message: `${isVenueProfile ? 'A venue' : 'An artist'} with that slug already exists`,
           });
@@ -710,6 +717,8 @@ artistRouter.post(
           .where({ id: existingWithSlug.id })
           .update({
             ...profilePayload,
+            is_shell: false,
+            shell_claimed_at: claimableShell ? new Date() : existingWithSlug.shell_claimed_at,
             updated_at: new Date(),
           })
           .returning('*');

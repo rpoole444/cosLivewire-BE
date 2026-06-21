@@ -7,6 +7,10 @@ const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { ensureAuth, requireAdmin } = require('../middleware/auth');
 const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileByInput, normalizeVenueName } = require('../utils/venueProfiles');
+const {
+  duplicateWarningForLevel,
+  findDuplicateCandidates,
+} = require('../utils/eventDuplicateDetection');
 const slugify = require('../utils/slugify');
 
 dayjs.extend(utc);
@@ -57,6 +61,10 @@ const appendWarning = (event, warning) => {
     ...event,
     parse_warnings: warnings,
   };
+};
+
+const appendWarnings = (event, warningsToAdd = []) => {
+  return warningsToAdd.reduce((nextEvent, warning) => appendWarning(nextEvent, warning), event);
 };
 
 const cleanPosterInput = (value) => {
@@ -178,7 +186,7 @@ const canManageBatch = (req, batch) => (
 
 const createImportBatch = async (req, res, source) => {
   try {
-    const { raw_text, defaults = {} } = req.body;
+    const { raw_text, defaults = {}, source_name, source_url } = req.body;
     if (!raw_text || typeof raw_text !== 'string') {
       return res.status(400).json({ message: 'raw_text is required' });
     }
@@ -270,7 +278,7 @@ const createImportBatch = async (req, res, source) => {
     }
 
     const venueProfileCache = new Map();
-    const stagedEvents = [];
+    let stagedEvents = [];
     for (let index = 0; index < parsedEvents.length; index += 1) {
       const event = parsedEvents[index];
       const duplicateWarning = duplicateRejectedRows.get(index);
@@ -301,12 +309,23 @@ const createImportBatch = async (req, res, source) => {
 
       stagedEvents.push(duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults);
     }
+
+    const duplicateCandidates = await findDuplicateCandidates(knex, stagedEvents);
+    stagedEvents = stagedEvents.map((event, index) => {
+      const matches = duplicateCandidates.get(index) || [];
+      if (!matches.length) return event;
+
+      const warnings = matches.map((match) => duplicateWarningForLevel(match.level));
+      return appendWarnings(event, warnings);
+    });
     const warningCount = countWarnings(stagedEvents);
 
     const batchId = await knex.transaction(async (trx) => {
       const insertedBatch = await trx('import_batches')
         .insert({
           source,
+          source_name: cleanOptionalImportText(source_name || defaults.source_name, 160),
+          source_url: cleanOptionalImportText(source_url || defaults.source_url, 500),
           raw_text,
           created_by_user_id: req.user?.id || null,
         })
@@ -363,6 +382,123 @@ const createImportBatch = async (req, res, source) => {
 importsRouter.post('/moondog', requireAdmin, (req, res) => createImportBatch(req, res, 'moondog'));
 importsRouter.post('/profile', ensureAuth, (req, res) => createImportBatch(req, res, 'profile'));
 
+importsRouter.post('/shell-profiles', requireAdmin, async (req, res) => {
+  try {
+    const {
+      display_name,
+      profile_type,
+      slug: requestedSlug,
+      home_region,
+      profile_image,
+      website,
+      venue_address,
+      venue_city,
+      venue_state,
+      age_policy,
+    } = req.body || {};
+
+    const normalizedType = ['artist', 'venue', 'promoter'].includes(String(profile_type || '').toLowerCase())
+      ? String(profile_type).toLowerCase()
+      : 'artist';
+    const displayName = cleanOptionalImportText(display_name, 255);
+    if (!displayName) {
+      return res.status(400).json({ message: 'Display name is required.' });
+    }
+
+    const baseSlug = slugify(requestedSlug || displayName);
+    if (!baseSlug) {
+      return res.status(400).json({ message: 'Could not generate a valid slug.' });
+    }
+
+    const existing = await knex('artists')
+      .where({ slug: baseSlug })
+      .whereNull('deleted_at')
+      .first();
+
+    if (existing) {
+      if (existing.is_shell) {
+        return res.json({
+          profile: existing,
+          message: 'A shell profile with this slug already exists.',
+        });
+      }
+      return res.status(409).json({ message: 'A claimed or active profile with that slug already exists.' });
+    }
+
+    const [profile] = await knex('artists')
+      .insert({
+        user_id: null,
+        display_name: displayName,
+        slug: baseSlug,
+        profile_type: normalizedType,
+        bio: normalizedType === 'venue'
+          ? `${displayName} is an unclaimed venue profile on Alpine Groove Guide.`
+          : `${displayName} is an unclaimed artist profile on Alpine Groove Guide.`,
+        contact_email: null,
+        profile_image: cleanPosterInput(profile_image),
+        website: cleanOptionalImportText(website, 255),
+        home_region: normalizeRegion(home_region, DEFAULT_REGION),
+        venue_address: normalizedType === 'venue' ? cleanOptionalImportText(venue_address, 255) : null,
+        venue_city: normalizedType === 'venue' ? cleanOptionalImportText(venue_city, 255) : null,
+        venue_state: normalizedType === 'venue' ? cleanOptionalImportText(venue_state, 64) : null,
+        age_policy: normalizedType === 'venue' ? cleanOptionalImportText(age_policy, 80) : null,
+        is_shell: true,
+        shell_created_by_user_id: req.user?.id || null,
+        is_approved: true,
+        is_listed: true,
+        is_pro: false,
+        trial_active: false,
+      })
+      .returning('*');
+
+    return res.status(201).json({ profile });
+  } catch (error) {
+    if (error?.code === '42703') {
+      return res.status(500).json({ message: 'Shell profile migration has not been run yet.' });
+    }
+    console.error('Error creating shell profile:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
+importsRouter.get('/duplicates/recent', requireAdmin, async (req, res) => {
+  try {
+    const { scorePotentialDuplicate } = require('../utils/eventDuplicateDetection');
+    const limit = Math.min(Math.max(Number(req.query.limit) || 80, 1), 250);
+    const events = await knex('events')
+      .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'region', 'source', 'source_label', 'source_fingerprint')
+      .orderBy('created_at', 'desc')
+      .limit(limit);
+
+    const pairs = [];
+    for (let i = 0; i < events.length; i += 1) {
+      for (let j = i + 1; j < events.length; j += 1) {
+        const match = scorePotentialDuplicate(events[i], events[j]);
+        if (match) {
+          pairs.push({
+            event_a: events[i],
+            event_b: events[j],
+            confidence: match.level,
+            score: Number(match.score.toFixed(3)),
+            reason: match.reason,
+            suggested_action: match.level === 'exact' || match.level === 'likely'
+              ? 'review_merge_or_delete_duplicate'
+              : 'review_manually',
+          });
+        }
+      }
+    }
+
+    return res.json({
+      scanned_count: events.length,
+      duplicate_pairs: pairs.sort((a, b) => b.score - a.score),
+    });
+  } catch (error) {
+    console.error('Error scanning duplicate events:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 const parseWarningsField = (value) => {
   if (value == null) return [];
   if (Array.isArray(value)) return value;
@@ -390,7 +526,14 @@ const cleanOptionalImportText = (value, maxLength = 500) => {
 
 const hasDuplicateWarning = (event) => {
   return parseWarningsField(event.parse_warnings).some((warning) =>
-    ['duplicate_existing_event', 'duplicate_existing_import', 'duplicate_in_batch'].includes(warning)
+    [
+      'duplicate_existing_event',
+      'duplicate_existing_import',
+      'duplicate_in_batch',
+      'duplicate_exact',
+      'duplicate_likely',
+      'duplicate_possible',
+    ].includes(warning)
   );
 };
 
