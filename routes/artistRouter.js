@@ -132,7 +132,19 @@ artistRouter.get('/public-list', async (req, res) => {
 artistRouter.get('/admin/options', isAdmin, async (req, res) => {
   try {
     const profiles = await knex('artists')
-      .select('id', 'display_name', 'slug', 'profile_type', 'home_region', 'venue_city', 'venue_state')
+      .select(
+        'id',
+        'display_name',
+        'slug',
+        'profile_type',
+        'home_region',
+        'venue_address',
+        'venue_city',
+        'venue_state',
+        'website',
+        'age_policy',
+        'profile_image'
+      )
       .where({ is_approved: true })
       .whereNull('deleted_at')
       .orderBy('profile_type')

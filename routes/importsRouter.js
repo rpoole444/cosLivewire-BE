@@ -132,7 +132,7 @@ const resolveSourceOwnerUserId = async (db, source, batch) => {
 
 importsRouter.post('/moondog', async (req, res) => {
   try {
-    const { raw_text } = req.body;
+    const { raw_text, defaults = {} } = req.body;
     if (!raw_text || typeof raw_text !== 'string') {
       return res.status(400).json({ message: 'raw_text is required' });
     }
@@ -149,11 +149,57 @@ importsRouter.post('/moondog', async (req, res) => {
     const parsedEvents = parseMoondogCalendar(raw_text);
     const duplicateRejectedRows = await getDuplicateRejectedRows(source, parsedEvents);
     const sourceConfig = SOURCE_CONFIG[source] || {};
+    const defaultVenueProfileId = parseOptionalProfileId(defaults.venue_profile_id);
+    let venueDefaults = {
+      venue_profile_id: defaultVenueProfileId,
+      venue_name: cleanOptionalImportText(defaults.venue_name, 255),
+      location: cleanOptionalImportText(defaults.location || defaults.venue_name, 255),
+      address: cleanOptionalImportText(defaults.address, 255),
+      city: cleanOptionalImportText(defaults.city, 255),
+      website: cleanOptionalImportText(defaults.website, 255),
+      age_policy: cleanOptionalImportText(defaults.age_policy, 120),
+      poster: cleanOptionalImportText(defaults.poster, 255),
+      region: normalizeRegion(defaults.region, sourceConfig.defaultRegion || DEFAULT_REGION),
+    };
+
+    if (defaultVenueProfileId) {
+      const venue = await knex('artists')
+        .select('id', 'display_name', 'venue_address', 'venue_city', 'website', 'age_policy', 'profile_image', 'home_region')
+        .where({ id: defaultVenueProfileId, profile_type: 'venue' })
+        .whereNull('deleted_at')
+        .first();
+
+      if (!venue) {
+        return res.status(400).json({ message: 'Selected venue profile was not found.' });
+      }
+
+      venueDefaults = {
+        ...venueDefaults,
+        venue_profile_id: venue.id,
+        venue_name: venueDefaults.venue_name || venue.display_name || null,
+        location: venueDefaults.location || venue.display_name || null,
+        address: venueDefaults.address || venue.venue_address || null,
+        city: venueDefaults.city || venue.venue_city || null,
+        website: venueDefaults.website || venue.website || null,
+        age_policy: venueDefaults.age_policy || venue.age_policy || null,
+        poster: venueDefaults.poster || venue.profile_image || null,
+        region: normalizeRegion(venueDefaults.region, venue.home_region || sourceConfig.defaultRegion || DEFAULT_REGION),
+      };
+    }
+
     const stagedEvents = parsedEvents.map((event, index) => {
       const duplicateWarning = duplicateRejectedRows.get(index);
       const eventWithDefaults = {
         ...event,
-        region: event.region || sourceConfig.defaultRegion || DEFAULT_REGION,
+        venue_name: event.venue_name || venueDefaults.venue_name,
+        location: event.location || venueDefaults.location || event.venue_name || venueDefaults.venue_name,
+        address: event.address || venueDefaults.address,
+        city: event.city || venueDefaults.city,
+        website: event.website || venueDefaults.website,
+        age_policy: event.age_policy || venueDefaults.age_policy,
+        poster: event.poster || venueDefaults.poster,
+        venue_profile_id: event.venue_profile_id || venueDefaults.venue_profile_id,
+        region: event.region || venueDefaults.region || sourceConfig.defaultRegion || DEFAULT_REGION,
       };
 
       return duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults;
@@ -182,6 +228,13 @@ importsRouter.post('/moondog', async (req, res) => {
         date: event.date,
         start_time: event.start_time,
         region: event.region,
+        venue_profile_id: event.venue_profile_id || null,
+        location: event.location || null,
+        address: event.address || null,
+        city: event.city || null,
+        website: event.website || null,
+        age_policy: event.age_policy || null,
+        poster: event.poster || null,
         raw_block: event.raw_block,
         parse_warnings: JSON.stringify(event.parse_warnings || []),
         fingerprint: event.fingerprint,
@@ -223,6 +276,11 @@ const parseOptionalProfileId = (value) => {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const cleanOptionalImportText = (value, maxLength = 500) => {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
 };
 
 const hasDuplicateWarning = (event) => {
@@ -405,7 +463,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
               sourceConfig.defaultRegion || inferRegionFromText(event.city, event.location, event.address, event.venue_name)
             ),
             ticket_price: null,
-            age_restriction: null,
+            age_restriction: event.age_policy || null,
             website_link: null,
             is_approved: false,
             venue_name: event.venue_name || null,
@@ -672,6 +730,7 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
       artist_display,
       artist_profile_id,
       venue_profile_id,
+      age_policy,
       title,
       region,
     } = req.body || {};
@@ -694,6 +753,7 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
     if (nextVenueName !== undefined) updatePayload.venue_name = String(nextVenueName).trim();
     if (artist_display !== undefined) updatePayload.artist_display = String(artist_display).trim();
     if (title !== undefined) updatePayload.title = String(title).trim();
+    if (age_policy !== undefined) updatePayload.age_policy = cleanOptionalImportText(age_policy, 120);
     if (region !== undefined) updatePayload.region = normalizeRegion(region, DEFAULT_REGION);
 
     const nextArtistProfileId = parseOptionalProfileId(artist_profile_id);

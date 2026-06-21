@@ -362,6 +362,7 @@ eventRouter.get('/admin/summary', isAdmin, async (req, res) => {
         { label: 'Artist directory', href: '/artists' },
         { label: 'Venue directory', href: '/venues/colorado-springs' },
         { label: 'Import Moondog', href: '/admin/import' },
+        { label: 'Weekly promoter packet', href: '/admin/promoter-packet' },
       ],
     });
   } catch (error) {
