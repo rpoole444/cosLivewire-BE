@@ -6,7 +6,7 @@ const customParseFormat = require('dayjs/plugin/customParseFormat');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 const { ensureAuth, requireAdmin } = require('../middleware/auth');
 const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
-const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
+const { findVenueProfileByInput, normalizeVenueName } = require('../utils/venueProfiles');
 const slugify = require('../utils/slugify');
 
 dayjs.extend(utc);
@@ -27,7 +27,7 @@ const SOURCE_CONFIG = {
     defaultPoster: 'https://alpinegg-posters.s3.us-east-2.amazonaws.com/promoters/moondog-music-shop.png',
   },
   profile: {
-    label: null,
+    label: 'Provided by Alpine Groove Guide',
     ownerEmail: null,
     defaultRegion: DEFAULT_REGION,
     defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
@@ -67,6 +67,29 @@ const cleanPosterInput = (value) => {
   }
   return cleaned;
 };
+
+const getVenueProfileCacheKey = ({ venueProfileId, venueName } = {}) => {
+  const parsedId = parseOptionalProfileId(venueProfileId);
+  if (parsedId) return `id:${parsedId}`;
+  return `name:${normalizeVenueName(venueName)}`;
+};
+
+const resolveVenueProfileForImport = async (db, cache, { venueProfileId, venueName } = {}) => {
+  const key = getVenueProfileCacheKey({ venueProfileId, venueName });
+  if (!key || key === 'name:') return null;
+  if (!cache.has(key)) {
+    const venue = await findVenueProfileByInput(db, { venueProfileId, venueName });
+    cache.set(key, venue || null);
+  }
+  return cache.get(key);
+};
+
+const resolveImportPoster = ({ explicitPoster, venueProfile, profileDefaultPoster, sourceDefaultPoster }) => (
+  cleanPosterInput(explicitPoster) ||
+  cleanPosterInput(venueProfile?.profile_image) ||
+  cleanPosterInput(profileDefaultPoster) ||
+  cleanPosterInput(sourceDefaultPoster)
+);
 
 const getDuplicateRejectedRows = async (source, parsedEvents) => {
   const fingerprints = parsedEvents
@@ -246,26 +269,38 @@ const createImportBatch = async (req, res, source) => {
       };
     }
 
-    const stagedEvents = parsedEvents.map((event, index) => {
+    const venueProfileCache = new Map();
+    const stagedEvents = [];
+    for (let index = 0; index < parsedEvents.length; index += 1) {
+      const event = parsedEvents[index];
       const duplicateWarning = duplicateRejectedRows.get(index);
+      const venueProfile = await resolveVenueProfileForImport(knex, venueProfileCache, {
+        venueProfileId: event.venue_profile_id || profileDefaults.venue_profile_id,
+        venueName: event.venue_name || profileDefaults.venue_name,
+      });
       const eventWithDefaults = {
         ...event,
         artist_display: event.artist_display || profileDefaults.artist_display,
         artist_profile_id: event.artist_profile_id || profileDefaults.artist_profile_id,
-        venue_name: event.venue_name || profileDefaults.venue_name,
-        location: event.location || profileDefaults.location || event.venue_name || profileDefaults.venue_name,
-        address: event.address || profileDefaults.address,
-        city: event.city || profileDefaults.city,
-        website: event.website || profileDefaults.website,
-        website_link: event.website_link || profileDefaults.website_link || event.website || profileDefaults.website,
+        venue_name: event.venue_name || profileDefaults.venue_name || venueProfile?.display_name || null,
+        location: event.location || profileDefaults.location || event.venue_name || profileDefaults.venue_name || venueProfile?.display_name || null,
+        address: event.address || profileDefaults.address || venueProfile?.venue_address || null,
+        city: event.city || profileDefaults.city || venueProfile?.venue_city || null,
+        website: event.website || profileDefaults.website || venueProfile?.website || null,
+        website_link: event.website_link || profileDefaults.website_link || event.website || profileDefaults.website || venueProfile?.website || null,
         age_policy: event.age_policy || profileDefaults.age_policy,
-        poster: cleanPosterInput(event.poster) || profileDefaults.poster,
-        venue_profile_id: event.venue_profile_id || profileDefaults.venue_profile_id,
-        region: event.region || profileDefaults.region || sourceConfig.defaultRegion || DEFAULT_REGION,
+        poster: resolveImportPoster({
+          explicitPoster: event.poster,
+          venueProfile,
+          profileDefaultPoster: profileDefaults.poster,
+          sourceDefaultPoster: sourceConfig.defaultPoster,
+        }),
+        venue_profile_id: event.venue_profile_id || profileDefaults.venue_profile_id || venueProfile?.id || null,
+        region: event.region || profileDefaults.region || venueProfile?.home_region || sourceConfig.defaultRegion || DEFAULT_REGION,
       };
 
-      return duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults;
-    });
+      stagedEvents.push(duplicateWarning ? appendWarning(eventWithDefaults, duplicateWarning) : eventWithDefaults);
+    }
     const warningCount = countWarnings(stagedEvents);
 
     const batchId = await knex.transaction(async (trx) => {
@@ -483,13 +518,16 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           `[IMPORT PROMOTE] "${event.title || event.artist_display || 'Untitled Event'}" date=${finalDate} start_time=${finalStartTime}`
         );
 
-        const normalizedPoster = cleanPosterInput(event.poster);
-        const poster = normalizedPoster
-          ? normalizedPoster
-          : (sourceConfig.defaultPoster || null);
-        const venueProfileId = await findVenueProfileIdByInput(trx, {
+        const venueProfile = await findVenueProfileByInput(trx, {
           venueProfileId: event.venue_profile_id,
           venueName: event.venue_name,
+        });
+        const venueProfileId = venueProfile?.id || null;
+        const poster = resolveImportPoster({
+          explicitPoster: event.poster,
+          venueProfile,
+          profileDefaultPoster: null,
+          sourceDefaultPoster: sourceConfig.defaultPoster,
         });
         const artistProfileId = parseOptionalProfileId(event.artist_profile_id);
 
