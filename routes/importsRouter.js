@@ -30,7 +30,7 @@ const SOURCE_CONFIG = {
     label: null,
     ownerEmail: null,
     defaultRegion: DEFAULT_REGION,
-    defaultPoster: null,
+    defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
   },
 };
 
@@ -57,6 +57,15 @@ const appendWarning = (event, warning) => {
     ...event,
     parse_warnings: warnings,
   };
+};
+
+const cleanPosterInput = (value) => {
+  const cleaned = cleanOptionalImportText(value, 255);
+  if (!cleaned) return null;
+  if (['tbd', 'tba', 'n/a', 'na', 'none', 'null'].includes(cleaned.toLowerCase())) {
+    return null;
+  }
+  return cleaned;
 };
 
 const getDuplicateRejectedRows = async (source, parsedEvents) => {
@@ -179,7 +188,7 @@ const createImportBatch = async (req, res, source) => {
       website: cleanOptionalImportText(defaults.website, 255),
       website_link: cleanOptionalImportText(defaults.website_link, 255),
       age_policy: cleanOptionalImportText(defaults.age_policy, 120),
-      poster: cleanOptionalImportText(defaults.poster, 255),
+      poster: cleanPosterInput(defaults.poster),
       region: normalizeRegion(defaults.region, sourceConfig.defaultRegion || DEFAULT_REGION),
     };
 
@@ -250,7 +259,7 @@ const createImportBatch = async (req, res, source) => {
         website: event.website || profileDefaults.website,
         website_link: event.website_link || profileDefaults.website_link || event.website || profileDefaults.website,
         age_policy: event.age_policy || profileDefaults.age_policy,
-        poster: event.poster || profileDefaults.poster,
+        poster: cleanPosterInput(event.poster) || profileDefaults.poster,
         venue_profile_id: event.venue_profile_id || profileDefaults.venue_profile_id,
         region: event.region || profileDefaults.region || sourceConfig.defaultRegion || DEFAULT_REGION,
       };
@@ -474,7 +483,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           `[IMPORT PROMOTE] "${event.title || event.artist_display || 'Untitled Event'}" date=${finalDate} start_time=${finalStartTime}`
         );
 
-        const normalizedPoster = event.poster && String(event.poster).trim();
+        const normalizedPoster = cleanPosterInput(event.poster);
         const poster = normalizedPoster
           ? normalizedPoster
           : (sourceConfig.defaultPoster || null);
@@ -842,7 +851,7 @@ importsRouter.patch('/:source/:batchId/events/:eventId', ensureAuth, async (req,
     if (description !== undefined) updatePayload.description = cleanOptionalImportText(description, 3000);
     if (website !== undefined) updatePayload.website = cleanOptionalImportText(website, 255);
     if (website_link !== undefined) updatePayload.website_link = cleanOptionalImportText(website_link, 255);
-    if (poster !== undefined) updatePayload.poster = cleanOptionalImportText(poster, 255);
+    if (poster !== undefined) updatePayload.poster = cleanPosterInput(poster);
     if (genre !== undefined) updatePayload.genre = cleanOptionalImportText(genre, 255);
     if (age_policy !== undefined) updatePayload.age_policy = cleanOptionalImportText(age_policy, 120);
     if (region !== undefined) updatePayload.region = normalizeRegion(region, DEFAULT_REGION);
