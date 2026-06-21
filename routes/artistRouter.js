@@ -129,6 +129,25 @@ artistRouter.get('/public-list', async (req, res) => {
   }
 });
 
+artistRouter.get('/admin/options', isAdmin, async (req, res) => {
+  try {
+    const profiles = await knex('artists')
+      .select('id', 'display_name', 'slug', 'profile_type', 'home_region', 'venue_city', 'venue_state')
+      .where({ is_approved: true })
+      .whereNull('deleted_at')
+      .orderBy('profile_type')
+      .orderBy('display_name');
+
+    return res.json(profiles.map((profile) => ({
+      ...profile,
+      profile_type: profile.profile_type || 'artist',
+    })));
+  } catch (err) {
+    console.error('Error fetching admin profile options:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET /api/artists/pending
 artistRouter.get('/pending', async (req, res) => {
   if (!req.isAuthenticated?.() || !req.user?.is_admin) {

@@ -219,6 +219,12 @@ const parseWarningsField = (value) => {
   return [];
 };
 
+const parseOptionalProfileId = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 const hasDuplicateWarning = (event) => {
   return parseWarningsField(event.parse_warnings).some((warning) =>
     ['duplicate_existing_event', 'duplicate_existing_import', 'duplicate_in_batch'].includes(warning)
@@ -354,8 +360,10 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           ? normalizedPoster
           : (sourceConfig.defaultPoster || null);
         const venueProfileId = await findVenueProfileIdByInput(trx, {
+          venueProfileId: event.venue_profile_id,
           venueName: event.venue_name,
         });
+        const artistProfileId = parseOptionalProfileId(event.artist_profile_id);
 
         const title = event.title || event.artist_display || 'Untitled Event';
         const slug = await generateUniqueEventSlug(trx, title, reservedSlugs);
@@ -402,6 +410,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             is_approved: false,
             venue_name: event.venue_name || null,
             venue_profile_id: venueProfileId,
+            artist_profile_id: artistProfileId,
             website: event.website || null,
             poster,
             start_time: finalStartTime,
@@ -661,6 +670,8 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
       venue,
       venue_name,
       artist_display,
+      artist_profile_id,
+      venue_profile_id,
       title,
       region,
     } = req.body || {};
@@ -685,6 +696,12 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
     if (title !== undefined) updatePayload.title = String(title).trim();
     if (region !== undefined) updatePayload.region = normalizeRegion(region, DEFAULT_REGION);
 
+    const nextArtistProfileId = parseOptionalProfileId(artist_profile_id);
+    const nextVenueProfileId = parseOptionalProfileId(venue_profile_id);
+
+    if (artist_profile_id !== undefined) updatePayload.artist_profile_id = nextArtistProfileId;
+    if (venue_profile_id !== undefined) updatePayload.venue_profile_id = nextVenueProfileId;
+
     const updatedEvent = await knex.transaction(async (trx) => {
       const event = await trx('import_events')
         .where({ id: eventId, batch_id: batchId, source })
@@ -693,6 +710,24 @@ importsRouter.patch('/:source/:batchId/events/:eventId', requireAdmin, async (re
       if (!event) return null;
       if (event.promoted_event_id) return { error: 'Event has already been promoted' };
       if (!Object.keys(updatePayload).length) return event;
+
+      if (nextArtistProfileId) {
+        const artistProfile = await trx('artists')
+          .select('id')
+          .where({ id: nextArtistProfileId, profile_type: 'artist' })
+          .whereNull('deleted_at')
+          .first();
+        if (!artistProfile) return { error: 'Invalid artist profile' };
+      }
+
+      if (nextVenueProfileId) {
+        const venueProfile = await trx('artists')
+          .select('id')
+          .where({ id: nextVenueProfileId, profile_type: 'venue' })
+          .whereNull('deleted_at')
+          .first();
+        if (!venueProfile) return { error: 'Invalid venue profile' };
+      }
 
       const rows = await trx('import_events')
         .where({ id: eventId })
