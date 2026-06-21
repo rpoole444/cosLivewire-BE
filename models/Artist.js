@@ -67,6 +67,7 @@ const Artist = {
         'a.genres',
         'a.bio',
         'a.profile_type',
+        'a.is_shell',
         'a.home_region',
         'a.venue_city',
         'a.venue_state',

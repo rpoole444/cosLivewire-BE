@@ -47,6 +47,12 @@ const resolveEventImage = (event = {}) => {
     event.venue_image ||
     event.profile_image
   );
+  const sourceImage = cleanImageUrl(
+    event.source_image_url ||
+    event.source_image ||
+    event.import_source_image ||
+    event.source_profile_image
+  );
 
   if (isUsableImageValue(poster)) {
     return {
@@ -60,6 +66,14 @@ const resolveEventImage = (event = {}) => {
     return {
       display_image_url: venueImage,
       display_image_source: 'venue_profile_image',
+      event_poster_status: poster ? 'default_or_invalid' : 'missing',
+    };
+  }
+
+  if (isUsableImageValue(sourceImage, { allowDefault: true })) {
+    return {
+      display_image_url: sourceImage,
+      display_image_source: 'source_image',
       event_poster_status: poster ? 'default_or_invalid' : 'missing',
     };
   }

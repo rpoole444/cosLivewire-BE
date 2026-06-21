@@ -113,13 +113,14 @@ artistRouter.get('/public-list', async (req, res) => {
         genres: artist.genres,
         bio: artist.bio,
         profile_type: artist.profile_type || 'artist',
+        is_shell: !!artist.is_shell,
         home_region: artist.home_region,
         venue_city: artist.venue_city,
         venue_state: artist.venue_state,
         is_pro: artist.user_is_pro,
         trial_ends_at: artist.user_trial_ends_at,
         pro_cancelled_at: artist.user_pro_cancelled_at,
-        access_state,
+        access_state: artist.is_shell ? 'shell' : access_state,
       };
     });
     res.json(shaped);
@@ -562,38 +563,45 @@ artistRouter.get('/:slug', async (req, res) => {
     const artist = await Artist.findBySlugWithEvents(req.params.slug);
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
 
-    // Fetch trial info from user table
-    const user = await knex('users')
-      .select('is_pro', 'trial_ends_at', 'pro_cancelled_at', 'stripe_customer_id')
-      .where({ id: artist.user_id })
-      .first();
-
-    if (!user) {
-      return res.status(500).json({ message: 'User associated with artist not found' });
-    }
-
     // Only show unapproved profiles to owners or admins
     const isOwner =
-      req.isAuthenticated?.() && req.user?.id === artist.user_id;
+      artist.user_id && req.isAuthenticated?.() && req.user?.id === artist.user_id;
     const isOwnerOrAdmin = isOwner || (req.isAuthenticated?.() && req.user?.is_admin);
     if (!artist.is_approved && !isOwnerOrAdmin) {
       return res.status(403).json({ message: 'Artist pending approval' });
     }
 
+    // Shell profiles are admin-created placeholders and may not have an owning user yet.
+    const user = artist.user_id
+      ? await knex('users')
+          .select('is_pro', 'trial_ends_at', 'pro_cancelled_at', 'stripe_customer_id')
+          .where({ id: artist.user_id })
+          .first()
+      : null;
+
+    if (artist.user_id && !user) {
+      return res.status(500).json({ message: 'User associated with artist not found' });
+    }
+
+    if (!artist.user_id && !artist.is_shell && !isOwnerOrAdmin) {
+      return res.status(404).json({ message: 'Artist not found' });
+    }
+
     const access_state = getArtistAccessState({
-      is_pro: user.is_pro,
-      trial_ends_at: user.trial_ends_at,
-      pro_cancelled_at: user.pro_cancelled_at,
-      stripe_customer_id: user.stripe_customer_id,
+      is_pro: user?.is_pro,
+      trial_ends_at: user?.trial_ends_at,
+      pro_cancelled_at: user?.pro_cancelled_at,
+      stripe_customer_id: user?.stripe_customer_id,
     });
 
     const enrichedArtist = {
       ...artist,
-      is_pro: user.is_pro,
-      trial_ends_at: user.trial_ends_at,
-      pro_cancelled_at: user.pro_cancelled_at,
-      access_state,
+      is_pro: user?.is_pro || false,
+      trial_ends_at: user?.trial_ends_at || null,
+      pro_cancelled_at: user?.pro_cancelled_at || null,
+      access_state: artist.is_shell ? 'shell' : access_state,
       is_owner: !!isOwner,
+      is_admin_editor: Boolean(req.isAuthenticated?.() && req.user?.is_admin),
     };
 
     res.json(enrichedArtist);
@@ -803,7 +811,9 @@ artistRouter.put('/:slug', upload.fields([
     return res.status(403).json({ message: 'Not authorized' });
   }
 
-  const access = await hasProAccess(artist.user_id);
+  const isAdminUser = !!req.user.is_admin;
+  const isShellProfile = !!artist.is_shell;
+  const access = isAdminUser ? true : await hasProAccess(artist.user_id);
   if (!access) {
     return res.status(403).json({ message: 'Artist profile access required to edit this profile.' });
   }
@@ -848,6 +858,7 @@ artistRouter.put('/:slug', upload.fields([
 
     if (
       updatedFields.profile_type === 'venue' &&
+      !(isAdminUser && isShellProfile) &&
       (!updatedFields.venue_address || !updatedFields.venue_city)
     ) {
       return res.status(400).json({ message: 'Venue address and city are required.' });
