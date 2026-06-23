@@ -174,7 +174,7 @@ const resolveSourceOwnerUserId = async (db, source, batch) => {
     return owner.id;
   }
 
-  return batch?.created_by_user_id || null;
+  return null;
 };
 
 const canManageBatch = (req, batch) => (
@@ -207,9 +207,13 @@ const createImportBatch = async (req, res, source) => {
 
     const parsedEvents = parseMoondogCalendar(raw_text);
     const duplicateRejectedRows = await getDuplicateRejectedRows(source, parsedEvents);
+    const ownerPolicy = defaults.owner_policy === 'personal_calendar' ? 'personal_calendar' : 'no_owner';
+    const ownerUserId = ownerPolicy === 'personal_calendar' ? req.user?.id || null : null;
     const defaultArtistProfileId = parseOptionalProfileId(defaults.artist_profile_id);
     const defaultVenueProfileId = parseOptionalProfileId(defaults.venue_profile_id);
     let profileDefaults = {
+      owner_policy: ownerPolicy,
+      user_id: ownerUserId,
       artist_profile_id: defaultArtistProfileId,
       venue_profile_id: defaultVenueProfileId,
       artist_display: cleanOptionalImportText(defaults.artist_display, 255),
@@ -326,7 +330,7 @@ const createImportBatch = async (req, res, source) => {
         .insert({
           source,
           source_name: cleanOptionalImportText(source_name || defaults.source_name, 160),
-          source_url: cleanOptionalImportText(source_url || defaults.source_url, 500),
+        source_url: cleanOptionalImportText(source_url || defaults.source_url, 500),
           raw_text,
           created_by_user_id: req.user?.id || null,
         })
@@ -339,6 +343,7 @@ const createImportBatch = async (req, res, source) => {
         status: duplicateRejectedRows.has(index) ? 'rejected' : 'pending',
         promoter_id: promoterId,
         source,
+        user_id: event.user_id || profileDefaults.user_id || null,
         venue_name: event.venue_name,
         title: event.title || null,
         artist_display: event.artist_display,
