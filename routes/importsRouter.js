@@ -657,10 +657,6 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         // Default end_time to enforce completeness at promotion time.
         const finalEndTime = event.end_time || addTwoHours(finalStartTime);
 
-        console.log(
-          `[IMPORT PROMOTE] "${event.title || event.artist_display || 'Untitled Event'}" date=${finalDate} start_time=${finalStartTime}`
-        );
-
         const venueProfile = await findVenueProfileByInput(trx, {
           venueProfileId: event.venue_profile_id,
           venueName: event.venue_name,

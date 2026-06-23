@@ -177,8 +177,6 @@ artistRouter.get('/pending', async (req, res) => {
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc');
 
-    console.log('Pending artists fetched:', pendingArtists.length, pendingArtists.map(a => a.slug));
-
     res.json(pendingArtists);
   } catch (err) {
     console.error('Error fetching pending artists:', err);
@@ -746,14 +744,6 @@ artistRouter.post(
               trial_active: !proActive,
               updated_at: new Date(),
             });
-          console.log(
-            '[artist-signup] synced artist flags for user=',
-            user.email,
-            'artistId=',
-            newArtist.id,
-            'proActive=',
-            proActive
-          );
           newArtist.is_pro = proActive;
           newArtist.trial_active = !proActive;
         } else {
