@@ -51,6 +51,8 @@ const validatePassword = (password) => {
   return passwordRegex.test(password);
 };
 
+const passwordHashSaltRounds = () => Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
+
 authRouter.delete('/users/:id', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {
     return res.status(403).json({ message: 'Not authorized' });
@@ -404,15 +406,15 @@ authRouter.get('/users', async (req, res) => {
 
 // Forgot password reset link sent to user email
 authRouter.post('/forgot-password', async (req, res) => {
-  const { email } = req.body;
+  const email = String(req.body?.email || '').trim().toLowerCase();
   const user = await findUserByEmail(email);
 
   if (!user) {
-    return res.status(404).json({ message: 'No user found with that email.' });
+    return res.json({ message: 'If an account exists for that email, we sent a password reset link.' });
   }
 
   const resetToken = crypto.randomBytes(32).toString('hex');
-  const hash = await bcrypt.hash(resetToken, Number(process.env.BCRYPT_SALT_ROUNDS));
+  const hash = await bcrypt.hash(resetToken, passwordHashSaltRounds());
 
   const expireTime = new Date(Date.now() + 3600000);
 
@@ -431,7 +433,12 @@ authRouter.post('/forgot-password', async (req, res) => {
 authRouter.post('/reset-password/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    const { email, password } = req.body;
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const { password } = req.body;
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+    }
 
     const user = await findUserByEmail(email);
 
@@ -445,7 +452,7 @@ authRouter.post('/reset-password/:token', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired password reset token.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, Number(process.env.BCRYPT_SALT_ROUNDS));
+    const hashedPassword = await bcrypt.hash(password, passwordHashSaltRounds());
     await resetPassword(user.id, hashedPassword);
 
     await clearUserResetToken(user.id);
