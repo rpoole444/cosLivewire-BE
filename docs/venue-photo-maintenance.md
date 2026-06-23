@@ -31,6 +31,45 @@ Production note: Heroku cannot read files from your local `Downloads` folder. In
 
 ## Scripts
 
+### Direct Venue Image Seed
+
+Use this when you have a known list of venue images and want Alpine Groove Guide to attach them to the right venue profiles.
+
+The seed file lives at:
+
+```txt
+data/venueImageSeed.json
+```
+
+Each row has a venue display name, local image path, region, city, and optional description/contact fields. The command resolves the venue by normalized display name:
+
+- If the venue profile already exists, it updates that profile's image.
+- If the venue profile does not exist, it creates a lightweight shell venue profile with that image.
+- Preview mode uploads nothing and writes no database changes.
+- Execute mode uploads local files to S3 and writes the profile changes.
+
+Preview:
+
+```sh
+npm run venue-image:seed
+```
+
+Execute:
+
+```sh
+npm run venue-image:seed -- --execute
+```
+
+Force replacement of existing venue profile images:
+
+```sh
+npm run venue-image:seed -- --execute --force
+```
+
+Production note: this script should run from a machine that has production `DATABASE_URL`, S3 credentials, and access to the local image files listed in `data/venueImageSeed.json`.
+
+### Flexible Maintenance Plan
+
 Dry run:
 
 ```sh
