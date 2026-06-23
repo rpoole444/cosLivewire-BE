@@ -11,6 +11,7 @@ const {
   duplicateWarningForLevel,
   findDuplicateCandidates,
 } = require('../utils/eventDuplicateDetection');
+const { attachEventImageFields } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
 
 dayjs.extend(utc);
@@ -513,6 +514,27 @@ const parseWarningsField = (value) => {
   return [];
 };
 
+const shapeImportEventForResponse = async (db, source, event) => {
+  const sourceConfig = SOURCE_CONFIG[source] || {};
+  const venueProfile = await findVenueProfileByInput(db, {
+    venueProfileId: event.venue_profile_id,
+    venueName: event.venue_name || event.location,
+  });
+  const shaped = {
+    ...event,
+    venue_profile_id: event.venue_profile_id || venueProfile?.id || null,
+    venue_profile_image: venueProfile?.profile_image || event.venue_profile_image || null,
+    venue_profile_display_name: venueProfile?.display_name || event.venue_profile_display_name || null,
+    source_image_url: sourceConfig.defaultPoster || null,
+    parse_warnings: parseWarningsField(event.parse_warnings),
+  };
+  return attachEventImageFields(shaped);
+};
+
+const shapeImportEventsForResponse = async (db, source, events = []) => (
+  Promise.all(events.map((event) => shapeImportEventForResponse(db, source, event)))
+);
+
 const parseOptionalProfileId = (value) => {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number.parseInt(value, 10);
@@ -816,10 +838,7 @@ importsRouter.post('/:source/events/:eventId/accept', ensureAuth, async (req, re
       return res.status(400).json({ message: updatedEvent.error });
     }
 
-  return res.json({
-      ...updatedEvent,
-      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
-    });
+    return res.json(await shapeImportEventForResponse(knex, source, updatedEvent));
   } catch (error) {
     console.error('Error accepting import event:', error);
     return res.status(500).json({ message: 'Internal server error.' });
@@ -876,10 +895,7 @@ importsRouter.post('/:source/events/:eventId/reject', ensureAuth, async (req, re
       return res.status(400).json({ message: updatedEvent.error });
     }
 
-    return res.json({
-      ...updatedEvent,
-      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
-    });
+    return res.json(await shapeImportEventForResponse(knex, source, updatedEvent));
   } catch (error) {
     console.error('Error rejecting import event:', error);
     return res.status(500).json({ message: 'Internal server error.' });
@@ -967,10 +983,7 @@ importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res)
 
     return res.json({
       updatedCount: result.updatedCount,
-      events: result.events.map((event) => ({
-        ...event,
-        parse_warnings: parseWarningsField(event.parse_warnings),
-      })),
+      events: await shapeImportEventsForResponse(knex, source, result.events),
     });
   } catch (error) {
     console.error('Error bulk updating import events:', error);
@@ -1094,10 +1107,7 @@ importsRouter.patch('/:source/:batchId/events/:eventId', ensureAuth, async (req,
       return res.status(400).json({ message: updatedEvent.error });
     }
 
-    return res.json({
-      ...updatedEvent,
-      parse_warnings: parseWarningsField(updatedEvent.parse_warnings),
-    });
+    return res.json(await shapeImportEventForResponse(knex, source, updatedEvent));
   } catch (error) {
     console.error('Error updating import event:', error);
     return res.status(500).json({ message: 'Internal server error.' });
@@ -1129,10 +1139,7 @@ importsRouter.get('/:source/:batchId', ensureAuth, async (req, res) => {
     return res.json({
       batch,
       canPromote: Boolean(req.user?.is_admin),
-      events: events.map((event) => ({
-        ...event,
-        parse_warnings: parseWarningsField(event.parse_warnings),
-      })),
+      events: await shapeImportEventsForResponse(knex, source, events),
     });
   } catch (error) {
     console.error('Error loading import batch:', error);

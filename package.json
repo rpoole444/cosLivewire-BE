@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "node tests/stripeStatus.test.js && node tests/eventDuplicateDetection.test.js && node tests/parseMoondogCalendar.test.js && node tests/parseMoondogCalendar.realworld.test.js && node tests/parseMoondogCalendar.timezone.test.js && node tests/eventImages.test.js && node tests/venuePhotoMaintenance.test.js",
+    "test": "node tests/stripeStatus.test.js && node tests/eventDuplicateDetection.test.js && node tests/parseMoondogCalendar.test.js && node tests/parseMoondogCalendar.realworld.test.js && node tests/parseMoondogCalendar.timezone.test.js && node tests/eventImages.test.js && node tests/venueProfiles.test.js && node tests/venuePhotoMaintenance.test.js",
     "check-pro-status": "node scripts/checkProStatus.js",
     "venue-photo:dry-run": "node scripts/venuePhotoDryRun.js",
     "venue-photo:apply": "node scripts/venuePhotoApply.js",

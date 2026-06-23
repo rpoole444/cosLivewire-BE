@@ -4,6 +4,34 @@ const normalizeVenueName = (value) =>
     .toLowerCase()
     .replace(/\s+/g, ' ');
 
+const normalizeVenueLookupName = (value) =>
+  normalizeVenueName(value)
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/\band\b/g, ' ')
+    .replace(/\bpark\b/g, ' ')
+    .replace(/\bamphitheatre\b/g, 'amphitheater')
+    .replace(/\bamphitheater\b/g, ' ')
+    .replace(/\bvenue\b/g, ' ')
+    .replace(/\bcolorado\b/g, ' ')
+    .replace(/\bco\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const venueNamesMatch = (left, right) => {
+  const normalizedLeft = normalizeVenueLookupName(left);
+  const normalizedRight = normalizeVenueLookupName(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.includes(normalizedRight) ||
+    normalizedRight.includes(normalizedLeft)
+  );
+};
+
 const parseVenueProfileId = (value) => {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number.parseInt(value, 10);
@@ -36,7 +64,16 @@ const findVenueProfileByInput = async (
     .orderBy('updated_at', 'desc')
     .first();
 
-  return venue || null;
+  if (venue) return venue;
+
+  const venues = await db('artists')
+    .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'home_region', 'is_approved', 'updated_at')
+    .where({ profile_type: 'venue' })
+    .whereNull('deleted_at')
+    .orderBy('is_approved', 'desc')
+    .orderBy('updated_at', 'desc');
+
+  return venues.find((candidate) => venueNamesMatch(normalizedName, candidate.display_name)) || null;
 };
 
 const findVenueProfileIdByInput = async (
@@ -51,5 +88,7 @@ module.exports = {
   findVenueProfileByInput,
   findVenueProfileIdByInput,
   normalizeVenueName,
+  normalizeVenueLookupName,
   parseVenueProfileId,
+  venueNamesMatch,
 };
