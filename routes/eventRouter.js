@@ -7,7 +7,14 @@ const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const { v4: uuidv4 } = require('uuid');
-const { sendEventReceiptEmail, sendEventApprovedEmail } = require("../models/mailer");
+const {
+  sendEventReceiptEmail,
+  sendEventApprovedEmail,
+  sendEventRejectedEmail,
+  sendEventSubmissionDigestEmail,
+  sendClaimSubmittedEmail,
+  sendClaimReviewedEmail,
+} = require("../models/mailer");
 const { findUserById } = require("../models/User");   // add this line
 const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const slugify = require("../utils/slugify")
@@ -250,8 +257,12 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
     }
 
     try {
-      if (insertedAll[0]) {
-        await sendEventReceiptEmail(insertedAll[0], req.user.email);
+      if (insertedAll.length) {
+        await sendEventSubmissionDigestEmail({
+          to: req.user.email,
+          events: insertedAll,
+          user: req.user,
+        });
       }
     } catch (mailErr) {
       console.error('Receipt e‑mail failed:', mailErr);
@@ -287,12 +298,12 @@ eventRouter.get('/review', isAdmin, async (req, res) => {
 eventRouter.put('/review/:eventId', isAdmin, async (req, res) => {
   try {
     const { eventId }  = req.params;
-    const { isApproved } = req.body;
+    const { isApproved, admin_notes: adminNotes } = req.body;
 
     const updatedEventArr = await updateEventStatus(eventId, isApproved);
     const updatedEvent    = updatedEventArr[0];
 
-    // ---------- e‑mail only when approved ----------
+    // ---------- e-mail notifications ----------
     if (isApproved && !updatedEvent.source_import_event_id) {
       try {
         const owner = await findUserById(updatedEvent.user_id);
@@ -302,6 +313,16 @@ eventRouter.put('/review/:eventId', isAdmin, async (req, res) => {
       } catch (mailErr) {
         console.error('Approval e‑mail failed:', mailErr);
         // keep going – approval itself succeeded
+      }
+    }
+    if (!isApproved) {
+      try {
+        const owner = await findUserById(updatedEvent.user_id);
+        if (owner?.email) {
+          await sendEventRejectedEmail({ to: owner.email, event: updatedEvent, adminNotes });
+        }
+      } catch (mailErr) {
+        console.error('Rejection e-mail failed:', mailErr);
       }
     }
 
@@ -473,6 +494,25 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
       return { claim: reviewedClaim, event: updatedEvent };
     });
 
+    try {
+      const [requester, artist] = await Promise.all([
+        findUserById(result.claim.requested_by_user_id),
+        knex('artists').where({ id: result.claim.artist_profile_id }).first(),
+      ]);
+      if (requester?.email) {
+        await sendClaimReviewedEmail({
+          to: requester.email,
+          claim: result.claim,
+          event: result.event,
+          artist,
+          approved: approve,
+          adminNotes,
+        });
+      }
+    } catch (mailErr) {
+      console.error('Claim review e-mail failed:', mailErr);
+    }
+
     return res.json({
       ...result,
       message: approve
@@ -621,6 +661,17 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
         updated_at: knex.fn.now(),
       })
       .returning('*');
+
+    try {
+      await sendClaimSubmittedEmail({
+        to: req.user.email,
+        claim,
+        event,
+        artist: artistProfile,
+      });
+    } catch (mailErr) {
+      console.error('Claim submitted e-mail failed:', mailErr);
+    }
 
     return res.json({
       claim,
@@ -827,6 +878,19 @@ eventRouter.delete('/:eventId', async (req, res) => {
     if (!event) return res.status(404).json({ message: 'Event not found' });
     if (!canDeleteEvent(event, req.user)) {
       return res.status(403).json({ message: 'Not authorized to delete this event' });
+    }
+
+    const adminNotes = req.body?.admin_notes || null;
+    const notifySubmitter = req.user.is_admin && req.body?.notify_submitter === true;
+    if (notifySubmitter && event.user_id) {
+      try {
+        const owner = await findUserById(event.user_id);
+        if (owner?.email) {
+          await sendEventRejectedEmail({ to: owner.email, event, adminNotes });
+        }
+      } catch (mailErr) {
+        console.error('Event delete/rejection e-mail failed:', mailErr);
+      }
     }
 
     const result = await deleteEvent(eventId);

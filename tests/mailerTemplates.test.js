@@ -2,6 +2,12 @@ const assert = require('assert');
 const {
   buildImportBatchSummaryEmailHtml,
   buildProfileCreatedEmailHtml,
+  buildProfileReviewedEmailHtml,
+  buildEventRejectionEmailHtml,
+  buildEventSubmissionDigestEmailHtml,
+  buildClaimSubmittedEmailHtml,
+  buildClaimReviewedEmailHtml,
+  buildNewsletterEmailHtml,
   escapeHtml,
 } = require('../models/mailer');
 
@@ -54,5 +60,68 @@ assert(profileHtml.includes('Your artist profile was created'));
 assert(profileHtml.includes('Poole and the Gang'));
 assert(profileHtml.includes('Pending admin review'));
 assert(profileHtml.includes('/UserProfile'));
+
+const approvedProfileHtml = buildProfileReviewedEmailHtml({
+  profile: {
+    display_name: 'Dazzle',
+    profile_type: 'venue',
+    slug: 'dazzle',
+  },
+  approved: true,
+});
+assert(approvedProfileHtml.includes('Your venue profile is approved'));
+assert(approvedProfileHtml.includes('Dazzle'));
+
+const rejectedEventHtml = buildEventRejectionEmailHtml({
+  event: {
+    title: 'Incomplete Show',
+    date: '2026-07-09',
+    venue_name: 'Venue TBA',
+  },
+  adminNotes: 'Please add a real venue and start time.',
+});
+assert(rejectedEventHtml.includes('Your event was not approved'));
+assert(rejectedEventHtml.includes('Please add a real venue'));
+
+const submissionDigestHtml = buildEventSubmissionDigestEmailHtml({
+  user: { email: 'artist@example.com' },
+  events: [
+    {
+      title: 'Batch Show',
+      venue_name: 'Lulu’s',
+      date: '2026-07-10',
+      start_time: '20:00:00',
+      slug: 'batch-show',
+    },
+  ],
+});
+assert(submissionDigestHtml.includes('1 event is in review'));
+assert(submissionDigestHtml.includes('Batch Show'));
+
+const claimSubmittedHtml = buildClaimSubmittedEmailHtml({
+  claim: { status: 'pending' },
+  event: { title: 'Claimable Show' },
+  artist: { display_name: 'Poole and the Gang' },
+});
+assert(claimSubmittedHtml.includes('Claim request submitted'));
+assert(claimSubmittedHtml.includes('Poole and the Gang'));
+
+const claimReviewedHtml = buildClaimReviewedEmailHtml({
+  claim: { status: 'approved' },
+  event: { title: 'Claimable Show', slug: 'claimable-show' },
+  artist: { display_name: 'Poole and the Gang' },
+  approved: true,
+});
+assert(claimReviewedHtml.includes('Claim approved'));
+assert(claimReviewedHtml.includes('Improve this listing'));
+
+const newsletterHtml = buildNewsletterEmailHtml({
+  subject: 'What’s new on Alpine Groove Guide',
+  previewText: 'New tools are live.',
+  message: 'Artists can claim imported shows.\n\nVenues can manage better listings.',
+});
+assert(newsletterHtml.includes('What’s new on Alpine Groove Guide'));
+assert(newsletterHtml.includes('Artists can claim imported shows.'));
+assert(newsletterHtml.includes('Venues can manage better listings.'));
 
 console.log('mailer template tests passed.');

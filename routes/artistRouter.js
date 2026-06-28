@@ -26,6 +26,7 @@ const {
   sendBookingInquiryEmail,
   sendVenueBookingRequestEmail,
   sendProfileCreatedEmail,
+  sendProfileReviewedEmail,
 } = require('../models/mailer');
 
 const MAX_EMBED_URL_LENGTH = 2000;
@@ -918,6 +919,7 @@ artistRouter.delete('/:slug', async (req, res) => {
   if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
 
   const { slug } = req.params;
+  const adminNotes = req.body?.admin_notes || null;
   const artist = await Artist.findBySlug(slug);
 
   if (!artist) return res.status(404).json({ message: 'Artist not found' });
@@ -937,6 +939,23 @@ artistRouter.delete('/:slug', async (req, res) => {
         updated_at: timestamp
       });
       recalcListingForUser(artist.user_id)
+
+    if (req.user.is_admin) {
+      try {
+        const owner = await knex('users').where({ id: artist.user_id }).first();
+        if (owner?.email) {
+          await sendProfileReviewedEmail({
+            to: owner.email,
+            profile: artist,
+            approved: false,
+            adminNotes,
+          });
+        }
+      } catch (mailErr) {
+        console.error('Profile denial e-mail failed:', mailErr);
+      }
+    }
+
     res.status(200).json({ message: 'Artist soft-deleted' });
   } catch (err) {
     console.error('Soft delete error:', err);
@@ -1024,6 +1043,19 @@ artistRouter.put('/:id/approve', async (req, res) => {
       .returning('*');
     await recalcListingForUser(updated.user_id);
 
+    try {
+      const owner = await knex('users').where({ id: updated.user_id }).first();
+      if (owner?.email) {
+        await sendProfileReviewedEmail({
+          to: owner.email,
+          profile: updated,
+          approved: true,
+        });
+      }
+    } catch (mailErr) {
+      console.error('Profile approval e-mail failed:', mailErr);
+    }
+
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -1037,6 +1069,7 @@ artistRouter.put('/:id/decline', async (req, res) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
   const { id } = req.params;
+  const adminNotes = req.body?.admin_notes || null;
 
   try {
     const [updated] = await knex('artists')
@@ -1048,6 +1081,20 @@ artistRouter.put('/:id/decline', async (req, res) => {
       })
       .returning('*');
     await recalcListingForUser(updated.user_id);
+
+    try {
+      const owner = await knex('users').where({ id: updated.user_id }).first();
+      if (owner?.email) {
+        await sendProfileReviewedEmail({
+          to: owner.email,
+          profile: updated,
+          approved: false,
+          adminNotes,
+        });
+      }
+    } catch (mailErr) {
+      console.error('Profile decline e-mail failed:', mailErr);
+    }
 
     res.json(updated);
   } catch (err) {

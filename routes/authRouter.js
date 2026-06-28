@@ -7,7 +7,7 @@ const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
-const { sendPasswordResetEmail, sendRegistrationEmail } = require("../models/mailer");
+const { sendPasswordResetEmail, sendRegistrationEmail, sendNewsletterEmail } = require("../models/mailer");
 const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
 const { computeProActive } = require('../utils/proState');
 const { findInviteByCode, markInviteUsed } = require('../models/Invite');
@@ -401,6 +401,58 @@ authRouter.get('/users', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+authRouter.post('/newsletter', async (req, res) => {
+  if (!req.isAuthenticated() || !req.user.is_admin) {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+
+  const subject = String(req.body?.subject || '').trim();
+  const message = String(req.body?.message || '').trim();
+  const previewText = String(req.body?.preview_text || '').trim();
+  const dryRun = req.body?.dry_run === true;
+
+  if (!subject || !message) {
+    return res.status(400).json({ message: 'Subject and message are required.' });
+  }
+
+  try {
+    const users = await getAllUsers();
+    const recipients = Array.from(new Set(
+      users
+        .map((user) => String(user.email || '').trim().toLowerCase())
+        .filter((email) => email && email.includes('@'))
+    ));
+
+    if (dryRun) {
+      return res.json({
+        dry_run: true,
+        recipient_count: recipients.length,
+        message: `${recipients.length} users would receive this newsletter.`,
+      });
+    }
+
+    const failed = [];
+    for (const email of recipients) {
+      try {
+        await sendNewsletterEmail({ to: email, subject, message, previewText });
+      } catch (error) {
+        console.error('Newsletter e-mail failed:', email, error);
+        failed.push(email);
+      }
+    }
+
+    return res.json({
+      sent_count: recipients.length - failed.length,
+      failed_count: failed.length,
+      failed,
+      message: `Newsletter sent to ${recipients.length - failed.length} users.`,
+    });
+  } catch (error) {
+    console.error('Newsletter send failed:', error);
+    return res.status(500).json({ message: 'Unable to send newsletter.' });
   }
 });
 

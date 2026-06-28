@@ -249,6 +249,186 @@ exports.sendProfileCreatedEmail = async ({ to, profile, user }) => {
   });
 };
 
+exports.buildProfileReviewedEmailHtml = ({ profile, approved, adminNotes }) => {
+  const type = profile.profile_type === "venue" ? "venue" : profile.profile_type === "promoter" ? "promoter" : "artist";
+  const url = profileUrl(profile);
+  return baseEmailShell({
+    title: approved ? `Your ${type} profile is approved` : `Your ${type} profile needs changes`,
+    body: `
+      <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+        ${approved
+          ? `${escapeHtml(profile.display_name)} is approved and can be shown in the Alpine Groove Guide directory.`
+          : `${escapeHtml(profile.display_name)} was reviewed, but it is not approved yet.`}
+      </p>
+      <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+        ${fieldRow("Profile", escapeHtml(profile.display_name))}
+        ${fieldRow("Type", escapeHtml(type))}
+        ${fieldRow("Status", approved ? "Approved" : "Needs changes")}
+        ${adminNotes ? fieldRow("Admin notes", escapeHtml(adminNotes)) : ""}
+      </table>
+      <p style="margin:18px 0 0">
+        <a href="${getFrontendBaseUrl()}/UserProfile" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">Open dashboard</a>
+        ${url ? `<a href="${url}" style="display:inline-block;margin-left:8px;border:1px solid #e0b861;color:#e0b861;padding:11px 16px;text-decoration:none;font-weight:700">View profile</a>` : ""}
+      </p>
+    `,
+  });
+};
+
+exports.sendProfileReviewedEmail = async ({ to, profile, approved, adminNotes }) => {
+  if (!to || !profile) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject: approved
+      ? `Your Alpine Groove Guide profile is approved`
+      : `Your Alpine Groove Guide profile needs changes`,
+    html: exports.buildProfileReviewedEmailHtml({ profile, approved, adminNotes }),
+  });
+};
+
+exports.buildEventRejectionEmailHtml = ({ event, adminNotes }) => baseEmailShell({
+  title: "Your event was not approved",
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      Your event submission was reviewed and not approved for the public calendar.
+    </p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+      ${fieldRow("Event", escapeHtml(event.title || "Untitled event"))}
+      ${fieldRow("Date", escapeHtml(formatDate(event.date)))}
+      ${fieldRow("Venue", escapeHtml(event.venue_name || event.location || "Venue TBA"))}
+      ${adminNotes ? fieldRow("Admin notes", escapeHtml(adminNotes)) : ""}
+    </table>
+    <p style="margin:0;color:#c9c0a0;font-size:14px;line-height:1.6">
+      You can submit a corrected listing any time from Alpine Groove Guide.
+    </p>
+  `,
+});
+
+exports.sendEventRejectedEmail = async ({ to, event, adminNotes }) => {
+  if (!to || !event) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject: `Your event “${event.title || "Untitled event"}” was not approved`,
+    html: exports.buildEventRejectionEmailHtml({ event, adminNotes }),
+  });
+};
+
+exports.buildEventSubmissionDigestEmailHtml = ({ events = [], user }) => baseEmailShell({
+  title: `${events.length} ${events.length === 1 ? "event is" : "events are"} in review`,
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      We received your event batch. These listings are now waiting for admin review.
+    </p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+      ${fieldRow("Submitted by", escapeHtml(user?.email || "Your account"))}
+      ${fieldRow("Events submitted", escapeHtml(String(events.length)))}
+    </table>
+    <ol style="margin:0;padding-left:20px;color:#c9c0a0;font-size:14px;line-height:1.5">
+      ${eventListItems(events)}
+    </ol>
+  `,
+});
+
+exports.sendEventSubmissionDigestEmail = async ({ to, events = [], user }) => {
+  if (!to || !events.length) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject: `Alpine Groove received ${events.length} ${events.length === 1 ? "event" : "events"} for review`,
+    html: exports.buildEventSubmissionDigestEmailHtml({ events, user }),
+  });
+};
+
+exports.buildClaimSubmittedEmailHtml = ({ claim, event, artist }) => baseEmailShell({
+  title: "Claim request submitted",
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      Your request to claim this event was sent to Alpine Groove Guide for admin review.
+    </p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+      ${fieldRow("Event", escapeHtml(event?.title || "Untitled event"))}
+      ${fieldRow("Artist profile", escapeHtml(artist?.display_name || "Artist profile"))}
+      ${fieldRow("Status", escapeHtml(claim?.status || "pending"))}
+    </table>
+  `,
+});
+
+exports.sendClaimSubmittedEmail = async ({ to, claim, event, artist }) => {
+  if (!to || !claim) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject: `Claim request submitted for “${event?.title || "event"}”`,
+    html: exports.buildClaimSubmittedEmailHtml({ claim, event, artist }),
+  });
+};
+
+exports.buildClaimReviewedEmailHtml = ({ claim, event, artist, approved, adminNotes }) => baseEmailShell({
+  title: approved ? "Claim approved" : "Claim not approved",
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      ${approved
+        ? "Your claim was approved. You can now edit this listing and make it stronger."
+        : "Your claim request was reviewed and not approved."}
+    </p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+      ${fieldRow("Event", escapeHtml(event?.title || "Untitled event"))}
+      ${fieldRow("Artist profile", escapeHtml(artist?.display_name || "Artist profile"))}
+      ${fieldRow("Status", approved ? "Approved" : "Rejected")}
+      ${adminNotes ? fieldRow("Admin notes", escapeHtml(adminNotes)) : ""}
+    </table>
+    ${approved ? `
+      <p style="margin:18px 0 0">
+        <a href="${eventUrl(event) || getFrontendBaseUrl()}" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">Improve this listing</a>
+      </p>
+    ` : ""}
+  `,
+});
+
+exports.sendClaimReviewedEmail = async ({ to, claim, event, artist, approved, adminNotes }) => {
+  if (!to || !claim) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject: approved
+      ? `Your claim was approved for “${event?.title || "event"}”`
+      : `Your claim was not approved for “${event?.title || "event"}”`,
+    html: exports.buildClaimReviewedEmailHtml({ claim, event, artist, approved, adminNotes }),
+  });
+};
+
+exports.buildNewsletterEmailHtml = ({ subject, message, previewText }) => {
+  const paragraphs = String(message || "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p style="margin:0 0 14px;color:#c9c0a0;font-size:15px;line-height:1.65;white-space:pre-wrap">${escapeHtml(paragraph)}</p>`)
+    .join("");
+
+  return baseEmailShell({
+    title: subject || "Alpine Groove Guide update",
+    eyebrow: "Community update",
+    body: `
+      ${previewText ? `<p style="margin:0 0 16px;color:#4f7870;font-size:13px;font-weight:700">${escapeHtml(previewText)}</p>` : ""}
+      ${paragraphs || '<p style="margin:0;color:#c9c0a0;font-size:15px;line-height:1.65">No message provided.</p>'}
+      <p style="margin:18px 0 0">
+        <a href="${getFrontendBaseUrl()}" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">Open Alpine Groove Guide</a>
+      </p>
+    `,
+  });
+};
+
+exports.sendNewsletterEmail = async ({ to, subject, message, previewText }) => {
+  if (!to || !subject || !message) return;
+  await transporter.sendMail({
+    from: process.env.EMAIL_USERNAME,
+    to,
+    subject,
+    html: exports.buildNewsletterEmailHtml({ subject, message, previewText }),
+  });
+};
+
 // ---------- 1.  password‑reset ----------
 exports.sendPasswordResetEmail = async (email, resetToken) => {
   const resetUrl = buildPasswordResetUrl(resetToken);
