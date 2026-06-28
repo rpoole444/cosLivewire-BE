@@ -1,4 +1,7 @@
 const express = require('express');
+const environment = process.env.NODE_ENV || 'development';
+const config = require('../knexfile')[environment];
+const knex = require('knex')(config);
 const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcryptjs');
 const passport = require('passport');
@@ -52,6 +55,18 @@ const validatePassword = (password) => {
 };
 
 const passwordHashSaltRounds = () => Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
+
+const createNewsletterToken = () => crypto.randomBytes(32).toString('hex');
+
+const newsletterUnsubscribeUrl = (token) => {
+  const baseUrl = (
+    process.env.FRONTEND_BASE_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.CORS_ORIGIN ||
+    ''
+  ).replace(/\/+$/, '');
+  return `${baseUrl || 'https://app.alpinegrooveguide.com'}/unsubscribe/${token}`;
+};
 
 authRouter.delete('/users/:id', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {
@@ -419,12 +434,20 @@ authRouter.post('/newsletter', async (req, res) => {
   }
 
   try {
-    const users = await getAllUsers();
-    const recipients = Array.from(new Set(
-      users
-        .map((user) => String(user.email || '').trim().toLowerCase())
-        .filter((email) => email && email.includes('@'))
-    ));
+    const users = await knex('users')
+      .select('id', 'email', 'newsletter_opt_out_at', 'newsletter_unsubscribe_token')
+      .whereNotNull('email')
+      .whereNull('newsletter_opt_out_at')
+      .orderBy('id', 'asc');
+
+    const recipientsByEmail = new Map();
+    users.forEach((user) => {
+      const email = String(user.email || '').trim().toLowerCase();
+      if (email && email.includes('@') && !recipientsByEmail.has(email)) {
+        recipientsByEmail.set(email, user);
+      }
+    });
+    const recipients = Array.from(recipientsByEmail.values());
 
     if (dryRun) {
       return res.json({
@@ -435,12 +458,27 @@ authRouter.post('/newsletter', async (req, res) => {
     }
 
     const failed = [];
-    for (const email of recipients) {
+    for (const user of recipients) {
+      let token = user.newsletter_unsubscribe_token;
+      if (!token) {
+        token = createNewsletterToken();
+        await knex('users')
+          .where({ id: user.id })
+          .whereNull('newsletter_unsubscribe_token')
+          .update({ newsletter_unsubscribe_token: token });
+      }
+
       try {
-        await sendNewsletterEmail({ to: email, subject, message, previewText });
+        await sendNewsletterEmail({
+          to: user.email,
+          subject,
+          message,
+          previewText,
+          unsubscribeUrl: newsletterUnsubscribeUrl(token),
+        });
       } catch (error) {
-        console.error('Newsletter e-mail failed:', email, error);
-        failed.push(email);
+        console.error('Newsletter e-mail failed:', user.email, error);
+        failed.push(user.email);
       }
     }
 
@@ -453,6 +491,27 @@ authRouter.post('/newsletter', async (req, res) => {
   } catch (error) {
     console.error('Newsletter send failed:', error);
     return res.status(500).json({ message: 'Unable to send newsletter.' });
+  }
+});
+
+authRouter.post('/newsletter/unsubscribe/:token', async (req, res) => {
+  const token = String(req.params.token || '').trim();
+  if (!token) return res.status(400).json({ message: 'Invalid unsubscribe link.' });
+
+  try {
+    const [updated] = await knex('users')
+      .where({ newsletter_unsubscribe_token: token })
+      .update({ newsletter_opt_out_at: knex.fn.now() })
+      .returning(['id', 'email', 'newsletter_opt_out_at']);
+
+    if (!updated) {
+      return res.status(404).json({ message: 'Unsubscribe link not found.' });
+    }
+
+    return res.json({ message: 'You have been unsubscribed from platform update emails.' });
+  } catch (error) {
+    console.error('Newsletter unsubscribe failed:', error);
+    return res.status(500).json({ message: 'Unable to unsubscribe right now.' });
   }
 });
 

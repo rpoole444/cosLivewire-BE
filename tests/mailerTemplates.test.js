@@ -116,12 +116,14 @@ assert(claimReviewedHtml.includes('Claim approved'));
 assert(claimReviewedHtml.includes('Improve this listing'));
 
 const newsletterHtml = buildNewsletterEmailHtml({
-  subject: 'What’s new on Alpine Groove Guide',
+  subject: 'What is new on Alpine Groove Guide',
   previewText: 'New tools are live.',
   message: 'Artists can claim imported shows.\n\nVenues can manage better listings.',
+  unsubscribeUrl: 'https://app.alpinegrooveguide.com/unsubscribe/test-token',
 });
-assert(newsletterHtml.includes('What’s new on Alpine Groove Guide'));
+assert(newsletterHtml.includes('What is new on Alpine Groove Guide'));
 assert(newsletterHtml.includes('Artists can claim imported shows.'));
 assert(newsletterHtml.includes('Venues can manage better listings.'));
+assert(newsletterHtml.includes('/unsubscribe/test-token'));
 
 console.log('mailer template tests passed.');

@@ -116,6 +116,10 @@ const baseEmailShell = ({ title, eyebrow = "Alpine Groove Guide", body }) => `
   </div>
 `;
 
+const emailFooter = ({ unsubscribeUrl } = {}) => `
+  ${unsubscribeUrl ? `<p style="margin:16px 0 0;color:#9b9275;font-size:12px;line-height:1.5"><a href="${unsubscribeUrl}" style="color:#e0b861">Unsubscribe from platform update emails</a></p>` : ""}
+`;
+
 const fieldRow = (label, value) => `
   <tr>
     <td style="padding:8px 10px;border-bottom:1px solid #263f38;color:#9b9275;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;vertical-align:top;width:34%">${escapeHtml(label)}</td>
@@ -398,7 +402,7 @@ exports.sendClaimReviewedEmail = async ({ to, claim, event, artist, approved, ad
   });
 };
 
-exports.buildNewsletterEmailHtml = ({ subject, message, previewText }) => {
+exports.buildNewsletterEmailHtml = ({ subject, message, previewText, unsubscribeUrl }) => {
   const paragraphs = String(message || "")
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
@@ -415,17 +419,18 @@ exports.buildNewsletterEmailHtml = ({ subject, message, previewText }) => {
       <p style="margin:18px 0 0">
         <a href="${getFrontendBaseUrl()}" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">Open Alpine Groove Guide</a>
       </p>
+      ${emailFooter({ unsubscribeUrl })}
     `,
   });
 };
 
-exports.sendNewsletterEmail = async ({ to, subject, message, previewText }) => {
+exports.sendNewsletterEmail = async ({ to, subject, message, previewText, unsubscribeUrl }) => {
   if (!to || !subject || !message) return;
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to,
     subject,
-    html: exports.buildNewsletterEmailHtml({ subject, message, previewText }),
+    html: exports.buildNewsletterEmailHtml({ subject, message, previewText, unsubscribeUrl }),
   });
 };
 
