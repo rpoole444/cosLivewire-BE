@@ -13,6 +13,7 @@ const {
 } = require('../utils/eventDuplicateDetection');
 const { attachEventImageFields } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
+const { sendImportBatchSummaryEmail } = require('../models/mailer');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -667,6 +668,8 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
 
       let promotedCount = 0;
       let duplicateSkippedCount = 0;
+      const promotedEvents = [];
+      const skippedEvents = [];
 
       for (const event of acceptedEvents) {
         // Use literal local date/time from the import record; no timezone conversion here.
@@ -709,6 +712,14 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
 
           if (existingEvent) {
             duplicateSkippedCount += 1;
+            skippedEvents.push({
+              title,
+              venue_name: event.venue_name,
+              location: event.location,
+              date: finalDate,
+              start_time: finalStartTime,
+              reason: 'Duplicate existing event',
+            });
             await trx('import_events')
               .where({ id: event.id })
               .update({
@@ -753,10 +764,28 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             source_fingerprint: sourceFingerprint,
             source_import_event_id: event.id,
           })
-          .returning('id');
+          .returning(['id', 'title', 'venue_name', 'location', 'date', 'start_time', 'region', 'slug']);
 
-        const promotedEventId = Array.isArray(rows) ? rows[0]?.id || rows[0] : rows;
+        const promotedEvent = Array.isArray(rows) ? rows[0] : rows;
+        const promotedEventId = promotedEvent?.id || promotedEvent;
         promotedCount += 1;
+        promotedEvents.push(
+          promotedEvent && typeof promotedEvent === 'object'
+            ? promotedEvent
+            : {
+                id: promotedEventId,
+                title,
+                venue_name: event.venue_name || null,
+                location: event.location || event.venue_name || null,
+                date: finalDate,
+                start_time: finalStartTime,
+                region: normalizeRegion(
+                  event.region,
+                  sourceConfig.defaultRegion || inferRegionFromText(event.city, event.location, event.address, event.venue_name)
+                ),
+                slug,
+              }
+        );
 
         await trx('import_events')
           .where({ id: event.id })
@@ -775,6 +804,17 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         skipped_count: totalCount - promotedCount,
         duplicate_skipped_count: duplicateSkippedCount,
         batch_id: batchId,
+        notification_user_id: sourceOwnerUserId || batch.created_by_user_id || req.user?.id || null,
+        batch: {
+          id: batch.id,
+          source: batch.source,
+          source_name: batch.source_name,
+          source_url: batch.source_url,
+          created_by_user_id: batch.created_by_user_id,
+        },
+        source_label: sourceConfig.label || source,
+        promoted_events: promotedEvents,
+        skipped_events: skippedEvents,
       };
     });
 
@@ -783,6 +823,29 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
     }
     if (summary.error === 'batch_already_completed') {
       return res.status(400).json({ message: 'Import batch already completed' });
+    }
+
+    if (summary.promoted_count > 0 && summary.notification_user_id) {
+      try {
+        const recipient = await knex('users')
+          .select('email', 'first_name', 'last_name')
+          .where({ id: summary.notification_user_id })
+          .first();
+
+        if (recipient?.email) {
+          const submittedBy = [recipient.first_name, recipient.last_name].filter(Boolean).join(' ') || recipient.email;
+          await sendImportBatchSummaryEmail({
+            to: recipient.email,
+            batch: summary.batch,
+            sourceLabel: summary.source_label,
+            promotedEvents: summary.promoted_events,
+            skippedEvents: summary.skipped_events,
+            submittedBy,
+          });
+        }
+      } catch (mailErr) {
+        console.error('Import batch summary e-mail failed:', mailErr);
+      }
     }
 
     return res.json(summary);

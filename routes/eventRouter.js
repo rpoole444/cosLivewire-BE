@@ -293,7 +293,7 @@ eventRouter.put('/review/:eventId', isAdmin, async (req, res) => {
     const updatedEvent    = updatedEventArr[0];
 
     // ---------- e‑mail only when approved ----------
-    if (isApproved) {
+    if (isApproved && !updatedEvent.source_import_event_id) {
       try {
         const owner = await findUserById(updatedEvent.user_id);
         if (owner?.email) {

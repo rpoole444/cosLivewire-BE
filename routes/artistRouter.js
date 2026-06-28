@@ -22,7 +22,11 @@ const {
 } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 const { normalizeRegion } = require('../utils/regions');
-const { sendBookingInquiryEmail, sendVenueBookingRequestEmail } = require('../models/mailer');
+const {
+  sendBookingInquiryEmail,
+  sendVenueBookingRequestEmail,
+  sendProfileCreatedEmail,
+} = require('../models/mailer');
 
 const MAX_EMBED_URL_LENGTH = 2000;
 const EMBED_FIELDS = ['embed_youtube', 'embed_soundcloud', 'embed_bandcamp'];
@@ -751,6 +755,16 @@ artistRouter.post(
         }
       } catch (syncErr) {
         console.error('[artist-signup] Failed to sync pro state', syncErr);
+      }
+
+      try {
+        await sendProfileCreatedEmail({
+          to: req.user?.email || contact_email,
+          profile: newArtist,
+          user: req.user,
+        });
+      } catch (mailErr) {
+        console.error('Profile creation e-mail failed:', mailErr);
       }
 
       return res.status(201).json(newArtist);
