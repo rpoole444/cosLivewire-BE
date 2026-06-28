@@ -8,6 +8,10 @@ const {
   buildClaimSubmittedEmailHtml,
   buildClaimReviewedEmailHtml,
   buildNewsletterEmailHtml,
+  buildPasswordResetEmailHtml,
+  buildRegistrationEmailHtml,
+  buildEventReceiptEmailHtml,
+  buildEventApprovedEmailHtml,
   escapeHtml,
 } = require('../models/mailer');
 
@@ -40,6 +44,8 @@ const batchHtml = buildImportBatchSummaryEmailHtml({
 });
 
 assert(batchHtml.includes('1 event accepted'));
+assert(batchHtml.includes('cid:agg-logo'));
+assert(batchHtml.includes('Alpine Groove Guide'));
 assert(batchHtml.includes('Moondog Weekly Calendar'));
 assert(batchHtml.includes('Jazz Night'));
 assert(batchHtml.includes('Duplicate Show'));
@@ -125,5 +131,47 @@ assert(newsletterHtml.includes('What is new on Alpine Groove Guide'));
 assert(newsletterHtml.includes('Artists can claim imported shows.'));
 assert(newsletterHtml.includes('Venues can manage better listings.'));
 assert(newsletterHtml.includes('/unsubscribe/test-token'));
+
+const passwordResetHtml = buildPasswordResetEmailHtml({
+  resetUrl: 'https://app.alpinegrooveguide.com/reset-password/test-token',
+});
+assert(passwordResetHtml.includes('Reset your password'));
+assert(passwordResetHtml.includes('cid:agg-logo'));
+assert(passwordResetHtml.includes('/reset-password/test-token'));
+
+const registrationHtml = buildRegistrationEmailHtml({
+  first: 'Reid',
+  last: 'Poole',
+});
+assert(registrationHtml.includes('Welcome, Reid Poole'));
+assert(registrationHtml.includes('Open your dashboard'));
+assert(registrationHtml.includes('cid:agg-logo'));
+
+const eventReceiptHtml = buildEventReceiptEmailHtml({
+  event: {
+    title: 'Submitted Show',
+    date: '2026-07-12',
+    start_time: '19:00:00',
+    venue_name: 'Dazzle',
+  },
+});
+assert(eventReceiptHtml.includes('Your event is in review'));
+assert(eventReceiptHtml.includes('Submitted Show'));
+assert(eventReceiptHtml.includes('Waiting for review'));
+assert(eventReceiptHtml.includes('cid:agg-logo'));
+
+const eventApprovedHtml = buildEventApprovedEmailHtml({
+  event: {
+    title: 'Approved Show',
+    date: '2026-07-12',
+    start_time: '19:00:00',
+    venue_name: 'Dazzle',
+    slug: 'approved-show',
+  },
+});
+assert(eventApprovedHtml.includes('Your event is live'));
+assert(eventApprovedHtml.includes('Approved Show'));
+assert(eventApprovedHtml.includes('/eventRouter/approved-show'));
+assert(eventApprovedHtml.includes('cid:agg-logo'));
 
 console.log('mailer template tests passed.');

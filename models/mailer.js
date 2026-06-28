@@ -22,6 +22,10 @@ const inlineImage = (filePath, cid) => ({
 // logo lives in /public — adjust as needed
 const LOGO_PATH = path.join(__dirname, "..", "public", "alpine_groove_guide_icon.png");
 
+const brandedEmailAttachments = () => (
+  fs.existsSync(LOGO_PATH) ? [inlineImage(LOGO_PATH, "agg-logo")] : []
+);
+
 const DEFAULT_FRONTEND_BASE_URL = "http://localhost:3001";
 
 const getFrontendBaseUrl = () => {
@@ -102,12 +106,27 @@ const profileUrl = (profile) => (
 );
 
 const baseEmailShell = ({ title, eyebrow = "Alpine Groove Guide", body }) => `
-  <div style="margin:0;padding:0;background:#0b0f14;color:#f4e7b8;font-family:Arial,sans-serif">
+  <div style="margin:0;padding:0;background:#0b0f14;color:#f4e7b8;font-family:Arial,Helvetica,sans-serif">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(title)}</div>
     <div style="max-width:680px;margin:0 auto;padding:24px">
-      <div style="border:1px solid #c9962e;background:#101610;padding:22px">
-        <p style="margin:0 0 8px;color:#4f7870;font-size:12px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase">${escapeHtml(eyebrow)}</p>
-        <h1 style="margin:0 0 18px;color:#e0b861;font-family:Georgia,serif;font-size:28px;line-height:1.15">${escapeHtml(title)}</h1>
+      <div style="border:1px solid #c9962e;background:#101610;padding:0;box-shadow:0 18px 50px rgba(0,0,0,0.35)">
+        <div style="padding:22px 22px 16px;border-bottom:1px solid #263f38;background:#0b0c09">
+          <table role="presentation" style="width:100%;border-collapse:collapse">
+            <tr>
+              <td style="vertical-align:middle;width:78px">
+                <img src="cid:agg-logo" width="64" height="64" alt="Alpine Groove Guide" style="display:block;border:0;border-radius:12px;background:#0b0c09"/>
+              </td>
+              <td style="vertical-align:middle">
+                <p style="margin:0;color:#9fc8bf;font-size:12px;font-weight:800;letter-spacing:0.22em;text-transform:uppercase">${escapeHtml(eyebrow)}</p>
+                <p style="margin:5px 0 0;color:#e0b861;font-family:Georgia,serif;font-size:20px;font-weight:700;letter-spacing:0.03em">Alpine Groove Guide</p>
+              </td>
+            </tr>
+          </table>
+        </div>
+        <div style="padding:24px 22px 26px">
+        <h1 style="margin:0 0 18px;color:#e0b861;font-family:Georgia,serif;font-size:30px;line-height:1.15">${escapeHtml(title)}</h1>
         ${body}
+        </div>
       </div>
       <p style="margin:16px 0 0;color:#9b9275;font-size:12px;line-height:1.5">
         You received this because you use Alpine Groove Guide to share or manage live music listings.
@@ -212,6 +231,7 @@ exports.sendImportBatchSummaryEmail = async ({
       skippedEvents,
       submittedBy,
     }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -250,6 +270,7 @@ exports.sendProfileCreatedEmail = async ({ to, profile, user }) => {
     to,
     subject: `Your Alpine Groove Guide ${type} profile has been created`,
     html: exports.buildProfileCreatedEmailHtml({ profile, user }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -287,6 +308,7 @@ exports.sendProfileReviewedEmail = async ({ to, profile, approved, adminNotes })
       ? `Your Alpine Groove Guide profile is approved`
       : `Your Alpine Groove Guide profile needs changes`,
     html: exports.buildProfileReviewedEmailHtml({ profile, approved, adminNotes }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -315,6 +337,7 @@ exports.sendEventRejectedEmail = async ({ to, event, adminNotes }) => {
     to,
     subject: `Your event “${event.title || "Untitled event"}” was not approved`,
     html: exports.buildEventRejectionEmailHtml({ event, adminNotes }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -341,6 +364,7 @@ exports.sendEventSubmissionDigestEmail = async ({ to, events = [], user }) => {
     to,
     subject: `Alpine Groove received ${events.length} ${events.length === 1 ? "event" : "events"} for review`,
     html: exports.buildEventSubmissionDigestEmailHtml({ events, user }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -365,6 +389,7 @@ exports.sendClaimSubmittedEmail = async ({ to, claim, event, artist }) => {
     to,
     subject: `Claim request submitted for “${event?.title || "event"}”`,
     html: exports.buildClaimSubmittedEmailHtml({ claim, event, artist }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -399,6 +424,7 @@ exports.sendClaimReviewedEmail = async ({ to, claim, event, artist, approved, ad
       ? `Your claim was approved for “${event?.title || "event"}”`
       : `Your claim was not approved for “${event?.title || "event"}”`,
     html: exports.buildClaimReviewedEmailHtml({ claim, event, artist, approved, adminNotes }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -431,10 +457,27 @@ exports.sendNewsletterEmail = async ({ to, subject, message, previewText, unsubs
     to,
     subject,
     html: exports.buildNewsletterEmailHtml({ subject, message, previewText, unsubscribeUrl }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
 // ---------- 1.  password‑reset ----------
+exports.buildPasswordResetEmailHtml = ({ resetUrl }) => baseEmailShell({
+  title: "Reset your password",
+  eyebrow: "Account security",
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      We received a request to reset your Alpine Groove Guide password. Use the button below to choose a new password.
+    </p>
+    <p style="margin:18px 0">
+      <a href="${resetUrl}" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:13px 18px;text-decoration:none;font-weight:800;border-radius:4px">Reset password</a>
+    </p>
+    <p style="margin:0;color:#9b9275;font-size:12px;line-height:1.6">
+      If you did not request this, you can ignore this email. The reset link is only useful to someone with access to this inbox.
+    </p>
+  `,
+});
+
 exports.sendPasswordResetEmail = async (email, resetToken) => {
   const resetUrl = buildPasswordResetUrl(resetToken);
 
@@ -442,80 +485,105 @@ exports.sendPasswordResetEmail = async (email, resetToken) => {
     from: process.env.EMAIL_USERNAME,
     to:   email,
     subject: "Alpine Groove • Password Reset Link",
-    html: `
-      <div style="font-family:Arial,sans-serif;text-align:center">
-        <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
-        <h2>Password Reset Request</h2>
-        <p>Click to reset your password:</p>
-        <p><a href="${resetUrl}">${resetUrl}</a></p>
-        <p>If you didn't request this, ignore the e‑mail.</p>
-      </div>
-    `,
-    attachments: [inlineImage(LOGO_PATH, "logo")]
+    html: exports.buildPasswordResetEmailHtml({ resetUrl }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
 // ---------- 2.  registration ----------
+exports.buildRegistrationEmailHtml = ({ first, last }) => {
+  const fullName = [first, last].filter(Boolean).join(" ") || "there";
+  return baseEmailShell({
+    title: `Welcome, ${fullName}`,
+    eyebrow: "Account created",
+    body: `
+      <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+        Your Alpine Groove Guide account is ready. A login account lets you submit shows, create artist or venue pages, claim imported gigs, and manage your music presence.
+      </p>
+      <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+        ${fieldRow("Account", escapeHtml(fullName))}
+        ${fieldRow("Next step", "Create or manage your public profile")}
+      </table>
+      <p style="margin:18px 0 0">
+        <a href="${getFrontendBaseUrl()}/UserProfile" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">Open your dashboard</a>
+      </p>
+    `,
+  });
+};
+
 exports.sendRegistrationEmail = async (email, first, last) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   email,
     subject: `Welcome to Alpine Groove, ${first}!`,
-    html: `
-      <div style="font-family:Arial,sans-serif;text-align:center">
-        <img src="cid:logo" width="100" alt="Alpine Groove Guide logo"/>
-        <h2>Welcome, ${first} ${last}!</h2>
-        <p>Thanks for registering—time to share some gigs.</p>
-      </div>
-    `,
-    attachments: [inlineImage(LOGO_PATH, "logo")]
+    html: exports.buildRegistrationEmailHtml({ first, last }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
 // ---------- 3.  event‑submission receipt ----------
-exports.sendEventReceiptEmail = async (event, userEmail) => {
-  const editProtocol = "Email Reid (reid@alpinegroove.com) with corrections.";
+exports.buildEventReceiptEmailHtml = ({ event }) => baseEmailShell({
+  title: "Your event is in review",
+  eyebrow: "Event submitted",
+  body: `
+    <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+      We received your event submission. An admin will review it before it appears on the public calendar.
+    </p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+      ${fieldRow("Event", escapeHtml(event.title || "Untitled event"))}
+      ${fieldRow("Date", escapeHtml(formatDate(event.date)))}
+      ${fieldRow("Time", escapeHtml(formatTime(event.start_time)))}
+      ${fieldRow("Venue", escapeHtml(event.venue_name || event.location || "Venue TBA"))}
+      ${fieldRow("Status", "Waiting for review")}
+    </table>
+    <p style="margin:0;color:#9b9275;font-size:12px;line-height:1.6">
+      Need to correct something? Reply to this email or contact Alpine Groove Guide with the updated details.
+    </p>
+  `,
+});
 
+exports.sendEventReceiptEmail = async (event, userEmail) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   userEmail,
-    subject: `Alpine Groove received “${event.title}” 🎶`,
-    html: `
-      <div style="font-family:Arial,sans-serif;text-align:center">
-        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
-        <h2>Your event is in review!</h2>
-        <p>Title: <strong>${event.title}</strong></p>
-        <p>Date:  ${event.date}</p>
-        <p>${editProtocol}</p>
-        <p>We'll notify you once it's approved.</p>
-        <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
-      </div>
-    `,
-    attachments: [
-      inlineImage(LOGO_PATH, "logo"),
-      ...(event.poster ? [inlineImage(event.poster, "poster")] : [])
-    ]
+    subject: `Alpine Groove received “${event.title}”`,
+    html: exports.buildEventReceiptEmailHtml({ event }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
 // ---------- 4.  event approved ----------
+exports.buildEventApprovedEmailHtml = ({ event }) => {
+  const url = eventUrl(event);
+  return baseEmailShell({
+    title: "Your event is live",
+    eyebrow: "Event approved",
+    body: `
+      <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
+        Your event has been approved and published on Alpine Groove Guide.
+      </p>
+      <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
+        ${fieldRow("Event", escapeHtml(event.title || "Untitled event"))}
+        ${fieldRow("Date", escapeHtml(formatDate(event.date)))}
+        ${fieldRow("Time", escapeHtml(formatTime(event.start_time)))}
+        ${fieldRow("Venue", escapeHtml(event.venue_name || event.location || "Venue TBA"))}
+      </table>
+      ${url ? `
+        <p style="margin:18px 0 0">
+          <a href="${url}" style="display:inline-block;background:#e0b861;color:#0b0f14;padding:12px 16px;text-decoration:none;font-weight:700">View live event</a>
+        </p>
+      ` : ""}
+    `,
+  });
+};
+
 exports.sendEventApprovedEmail = async (event, userEmail) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USERNAME,
     to:   userEmail,
-    subject: `Your event “${event.title}” is live on Alpine Groove 🎉`,
-    html: `
-      <div style="font-family:Arial,sans-serif;text-align:center">
-        <img src="cid:logo" width="90" alt="Alpine Groove Guide logo"/>
-        <h2>🎉 Congrats! Your event is published.</h2>
-        <p>View it here: <a href="${process.env.CORS_ORIGIN}/eventRouter/${event.slug}">event link</a></p>
-        <img src="cid:poster" width="250" style="margin-top:12px" alt="Event poster"/>
-      </div>
-    `,
-    attachments: [
-      inlineImage(LOGO_PATH, "logo"),
-      ...(event.poster? [inlineImage(event.poster, "poster")] : [])
-    ]
+    subject: `Your event “${event.title}” is live on Alpine Groove`,
+    html: exports.buildEventApprovedEmailHtml({ event }),
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -559,7 +627,7 @@ exports.sendBookingInquiryEmail = async ({ artist, inquiry }) => {
         </p>
       `,
     }),
-    attachments: [inlineImage(LOGO_PATH, "logo")]
+    attachments: brandedEmailAttachments(),
   });
 };
 
@@ -606,6 +674,6 @@ exports.sendVenueBookingRequestEmail = async ({ venue, inquiry }) => {
         </p>
       `,
     }),
-    attachments: [inlineImage(LOGO_PATH, "logo")]
+    attachments: brandedEmailAttachments(),
   });
 };
