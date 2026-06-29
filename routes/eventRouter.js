@@ -57,6 +57,7 @@ const canEditEvent = (event, user) => {
   if (!event || !user) return false;
   if (user.is_admin) return true;
   if (event.user_id === user.id) return true;
+  if (event.venue_profile_user_id && Number(event.venue_profile_user_id) === Number(user.id)) return true;
   return Number(event.claimed_artist_user_id) === Number(user.id);
 };
 

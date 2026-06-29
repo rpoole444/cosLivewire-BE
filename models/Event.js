@@ -40,6 +40,8 @@ const getEventsForReview = async () => {
       'events.*',
       'venue_profile.profile_image as venue_profile_image',
       'venue_profile.display_name as venue_profile_display_name',
+      'venue_profile.slug as venue_profile_slug',
+      'venue_profile.user_id as venue_profile_user_id',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -93,16 +95,35 @@ const updateEventStatus = (eventId, isApproved) => {
 const getAllEvents = async ({ region } = {}) => {
   const query = knex('events')
     .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+    .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
+    .leftJoin('users as claimed_user', 'events.claimed_by_user_id', 'claimed_user.id')
     .select(
       'events.*',
       'venue_profile.profile_image as venue_profile_image',
-      'venue_profile.display_name as venue_profile_display_name'
+      'venue_profile.display_name as venue_profile_display_name',
+      'venue_profile.slug as venue_profile_slug',
+      'venue_profile.user_id as venue_profile_user_id',
+      'claimed_artist.display_name as claimed_artist_display_name',
+      'claimed_artist.slug as claimed_artist_slug',
+      'claimed_artist.profile_type as claimed_artist_profile_type',
+      'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_user.email as claimed_by_user_email'
     );
   if (region && region !== REGION_ALL && REGION_SLUGS.has(String(region))) {
     query.where({ 'events.region': region });
   }
   const events = await query;
-  return attachEventImageFieldsToMany(events);
+  return attachEventImageFieldsToMany(events.map((event) => ({
+    ...event,
+    claimed_artist: event.artist_profile_id ? {
+      id: event.artist_profile_id,
+      display_name: event.claimed_artist_display_name,
+      slug: event.claimed_artist_slug,
+      profile_type: event.claimed_artist_profile_type,
+      user_id: event.claimed_artist_user_id,
+    } : null,
+    claimed_by_user_email: event.claimed_by_user_email,
+  })));
 };
 
 const updateEvent = async(eventId, eventData) => {
@@ -122,6 +143,8 @@ const findEventById = async (eventId) => {
       'events.*',
       'venue_profile.profile_image as venue_profile_image',
       'venue_profile.display_name as venue_profile_display_name',
+      'venue_profile.slug as venue_profile_slug',
+      'venue_profile.user_id as venue_profile_user_id',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -163,6 +186,8 @@ const findBySlug = async (slug) => {
       'events.*',
       'venue_profile.profile_image as venue_profile_image',
       'venue_profile.display_name as venue_profile_display_name',
+      'venue_profile.slug as venue_profile_slug',
+      'venue_profile.user_id as venue_profile_user_id',
       'claimed_artist.display_name as claimed_artist_display_name',
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
