@@ -130,7 +130,7 @@ const findDuplicateCandidates = async (db, incomingEvents, { daysBack = 60, days
   endDate.setUTCSeconds(endDate.getUTCSeconds() + (daysForward * DAY_SECONDS));
 
   const existingEvents = await db('events')
-    .select('id', 'title', 'date', 'start_time', 'venue_name', 'location', 'region', 'source', 'source_label', 'source_fingerprint')
+    .select('id', 'title', 'slug', 'date', 'start_time', 'venue_name', 'location', 'region', 'source', 'source_label', 'source_fingerprint')
     .whereBetween('date', [
       startDate.toISOString().slice(0, 10),
       endDate.toISOString().slice(0, 10),

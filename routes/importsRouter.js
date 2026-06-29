@@ -10,6 +10,7 @@ const { findVenueProfileByInput, normalizeVenueName } = require('../utils/venueP
 const {
   duplicateWarningForLevel,
   findDuplicateCandidates,
+  jaccardSimilarity,
 } = require('../utils/eventDuplicateDetection');
 const { attachEventImageFields } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
@@ -537,9 +538,70 @@ const shapeImportEventForResponse = async (db, source, event) => {
   return attachEventImageFields(shaped);
 };
 
-const shapeImportEventsForResponse = async (db, source, events = []) => (
-  Promise.all(events.map((event) => shapeImportEventForResponse(db, source, event)))
+const shapeDuplicateCandidate = (candidate) => ({
+  level: candidate.level,
+  score: Number(candidate.score || 0),
+  reason: candidate.reason || null,
+  event: candidate.event ? {
+    id: candidate.event.id,
+    title: candidate.event.title,
+    slug: candidate.event.slug,
+    date: candidate.event.date,
+    start_time: candidate.event.start_time,
+    venue_name: candidate.event.venue_name,
+    location: candidate.event.location,
+    region: candidate.event.region,
+    source: candidate.event.source,
+    source_label: candidate.event.source_label,
+  } : null,
+});
+
+const eventArtistSearchText = (event) => (
+  [event.artist_display, event.artist, event.title]
+    .filter(Boolean)
+    .join(' ')
 );
+
+const getArtistSuggestionsForImportEvents = async (db, events = []) => {
+  const artists = await db('artists')
+    .select('id', 'display_name', 'slug', 'home_region')
+    .where({ profile_type: 'artist' })
+    .whereNull('deleted_at')
+    .limit(500);
+
+  const suggestions = new Map();
+  events.forEach((event, index) => {
+    if (event.artist_profile_id) return;
+    const searchText = eventArtistSearchText(event);
+    if (!searchText) return;
+    const matches = artists
+      .map((artist) => ({
+        id: artist.id,
+        display_name: artist.display_name,
+        slug: artist.slug,
+        home_region: artist.home_region,
+        score: jaccardSimilarity(searchText, artist.display_name),
+      }))
+      .filter((artist) => artist.score >= 0.55)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    if (matches.length) suggestions.set(index, matches);
+  });
+  return suggestions;
+};
+
+const shapeImportEventsForResponse = async (db, source, events = []) => {
+  const duplicateCandidates = await findDuplicateCandidates(db, events);
+  const artistSuggestions = await getArtistSuggestionsForImportEvents(db, events);
+  return Promise.all(events.map(async (event, index) => {
+    const shaped = await shapeImportEventForResponse(db, source, event);
+    return {
+      ...shaped,
+      duplicate_candidates: (duplicateCandidates.get(index) || []).map(shapeDuplicateCandidate),
+      artist_suggestions: artistSuggestions.get(index) || [],
+    };
+  }));
+};
 
 const parseOptionalProfileId = (value) => {
   if (value === undefined || value === null || value === '') return null;
