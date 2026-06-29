@@ -402,6 +402,7 @@ eventRouter.get('/claims/review', isAdmin, async (req, res) => {
       .leftJoin('artists as existing_artist', 'e.artist_profile_id', 'existing_artist.id')
       .select(
         'ecr.*',
+        'ecr.claim_type',
         'e.title as event_title',
         'e.slug as event_slug',
         'e.date as event_date',
@@ -412,8 +413,11 @@ eventRouter.get('/claims/review', isAdmin, async (req, res) => {
         'e.poster as event_poster',
         'e.artist_profile_id as current_artist_profile_id',
         'a.display_name as artist_display_name',
+        'a.display_name as profile_display_name',
         'a.slug as artist_slug',
+        'a.slug as profile_slug',
         'a.profile_type as artist_profile_type',
+        'a.profile_type as profile_type',
         'u.first_name as requester_first_name',
         'u.last_name as requester_last_name',
         'u.email as requester_email',
@@ -451,8 +455,22 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
 
       if (!event) throw new Error('event_missing');
 
-      if (approve && event.artist_profile_id && Number(event.artist_profile_id) !== Number(claim.artist_profile_id)) {
+      const claimType = claim.claim_type === 'venue' ? 'venue' : 'artist';
+      if (
+        approve &&
+        claimType === 'artist' &&
+        event.artist_profile_id &&
+        Number(event.artist_profile_id) !== Number(claim.artist_profile_id)
+      ) {
         throw new Error('event_already_claimed');
+      }
+      if (
+        approve &&
+        claimType === 'venue' &&
+        event.venue_profile_id &&
+        Number(event.venue_profile_id) !== Number(claim.artist_profile_id)
+      ) {
+        throw new Error('venue_already_claimed');
       }
 
       const status = approve ? 'approved' : 'rejected';
@@ -469,25 +487,38 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
 
       let updatedEvent = event;
       if (approve) {
+        const eventUpdate = claimType === 'venue'
+          ? {
+              venue_profile_id: claim.artist_profile_id,
+              claimed_by_user_id: claim.requested_by_user_id,
+              claimed_at: trx.fn.now(),
+              last_edited_by_user_id: req.user.id,
+              updated_at: trx.fn.now(),
+            }
+          : {
+              artist_profile_id: claim.artist_profile_id,
+              claimed_by_user_id: claim.requested_by_user_id,
+              claimed_at: trx.fn.now(),
+              last_edited_by_user_id: req.user.id,
+              updated_at: trx.fn.now(),
+            };
+
         [updatedEvent] = await trx('events')
           .where({ id: claim.event_id })
-          .update({
-            artist_profile_id: claim.artist_profile_id,
-            claimed_by_user_id: claim.requested_by_user_id,
-            claimed_at: trx.fn.now(),
-            last_edited_by_user_id: req.user.id,
-            updated_at: trx.fn.now(),
-          })
+          .update(eventUpdate)
           .returning('*');
 
         await trx('event_claim_requests')
           .where({ event_id: claim.event_id, status: 'pending' })
+          .where({ claim_type: claimType })
           .whereNot({ id: claim.id })
           .update({
             status: 'rejected',
             reviewed_by_user_id: req.user.id,
             reviewed_at: trx.fn.now(),
-            admin_notes: 'Another claim was approved for this event.',
+            admin_notes: claimType === 'venue'
+              ? 'Another venue claim was approved for this event.'
+              : 'Another artist claim was approved for this event.',
             updated_at: trx.fn.now(),
           });
       }
@@ -517,7 +548,7 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
     return res.json({
       ...result,
       message: approve
-        ? 'Claim approved. The artist can now edit this event.'
+        ? `Claim approved. The ${result.claim.claim_type === 'venue' ? 'venue' : 'artist'} can now edit this event.`
         : 'Claim rejected.',
     });
   } catch (error) {
@@ -526,6 +557,9 @@ eventRouter.put('/claims/:claimId/review', isAdmin, async (req, res) => {
     }
     if (error.message === 'event_already_claimed') {
       return res.status(409).json({ message: 'This event is already claimed by another artist profile.' });
+    }
+    if (error.message === 'venue_already_claimed') {
+      return res.status(409).json({ message: 'This event is already linked to another venue profile.' });
     }
     console.error('Error reviewing event claim:', error);
     return res.status(500).json({ message: 'Internal server error.' });
@@ -546,6 +580,7 @@ eventRouter.get('/claims/mine', async (req, res) => {
         'ecr.id',
         'ecr.event_id',
         'ecr.artist_profile_id',
+        'ecr.claim_type',
         'ecr.status',
         'ecr.created_at',
         'ecr.reviewed_at',
@@ -557,7 +592,10 @@ eventRouter.get('/claims/mine', async (req, res) => {
         'e.venue_name as event_venue_name',
         'e.artist_profile_id as current_artist_profile_id',
         'a.display_name as artist_display_name',
+        'a.display_name as profile_display_name',
         'a.slug as artist_slug',
+        'a.slug as profile_slug',
+        'a.profile_type as profile_type',
         'reviewer.email as reviewed_by_email'
       )
       .where('a.user_id', req.user.id)
@@ -573,7 +611,7 @@ eventRouter.get('/claims/mine', async (req, res) => {
 });
 
 /**
- * Claim an imported/promoter/venue-created event for an artist profile.
+ * Claim an imported/promoter/venue-created event for an artist or venue profile.
  * Claiming creates an admin-reviewed request. Approval attaches the event and grants edit access.
  */
 eventRouter.post('/:eventId/claim', async (req, res) => {
@@ -583,10 +621,15 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
 
   try {
     const { eventId } = req.params;
-    const artistProfileId = Number(req.body.artist_profile_id);
+    const claimType = req.body.claim_type === 'venue' ? 'venue' : 'artist';
+    const artistProfileId = Number(req.body.artist_profile_id || req.body.profile_id);
 
     if (!Number.isInteger(artistProfileId)) {
-      return res.status(400).json({ message: 'Choose an artist profile to claim this event.' });
+      return res.status(400).json({
+        message: claimType === 'venue'
+          ? 'Choose a venue profile to claim this event.'
+          : 'Choose an artist profile to claim this event.',
+      });
     }
 
     const event = await findEventById(eventId);
@@ -601,24 +644,45 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
       return res.status(404).json({ message: 'Artist profile not found.' });
     }
 
-    if (artistProfile.profile_type && artistProfile.profile_type !== 'artist' && !req.user.is_admin) {
+    const profileType = artistProfile.profile_type || 'artist';
+    if (claimType === 'artist' && profileType !== 'artist' && !req.user.is_admin) {
       return res.status(400).json({ message: 'Choose an artist profile to claim this event.' });
     }
 
-    if (artistProfile.user_id !== req.user.id && !req.user.is_admin) {
-      return res.status(403).json({ message: 'Not authorized to claim for this artist profile.' });
+    if (claimType === 'venue' && profileType !== 'venue' && !req.user.is_admin) {
+      return res.status(400).json({ message: 'Choose a venue profile to claim this event.' });
     }
 
-    if (event.artist_profile_id && Number(event.artist_profile_id) !== artistProfileId) {
+    if (artistProfile.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({
+        message: claimType === 'venue'
+          ? 'Not authorized to claim for this venue profile.'
+          : 'Not authorized to claim for this artist profile.',
+      });
+    }
+
+    if (claimType === 'artist' && event.artist_profile_id && Number(event.artist_profile_id) !== artistProfileId) {
       return res.status(409).json({
         message: 'This event is already claimed by another artist profile.',
         claimed_artist: event.claimed_artist || null,
       });
     }
 
-    if (Number(event.artist_profile_id) === artistProfileId) {
+    if (claimType === 'venue' && event.venue_profile_id && Number(event.venue_profile_id) !== artistProfileId) {
       return res.status(409).json({
-        message: 'This event is already connected to that artist profile.',
+        message: 'This event is already linked to another venue profile.',
+        event,
+      });
+    }
+
+    if (
+      (claimType === 'artist' && Number(event.artist_profile_id) === artistProfileId) ||
+      (claimType === 'venue' && Number(event.venue_profile_id) === artistProfileId)
+    ) {
+      return res.status(409).json({
+        message: claimType === 'venue'
+          ? 'This event is already connected to that venue profile.'
+          : 'This event is already connected to that artist profile.',
         event,
       });
     }
@@ -627,6 +691,7 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
       .where({
         event_id: eventId,
         artist_profile_id: artistProfileId,
+        claim_type: claimType,
       })
       .first();
 
@@ -639,7 +704,9 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
       }
       if (existingRequest.status === 'approved') {
         return res.status(409).json({
-          message: 'This event is already connected to that artist profile.',
+          message: claimType === 'venue'
+            ? 'This event is already connected to that venue profile.'
+            : 'This event is already connected to that artist profile.',
           claim: existingRequest,
         });
       }
@@ -649,11 +716,13 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
       .insert({
         event_id: eventId,
         artist_profile_id: artistProfileId,
+        claim_type: claimType,
         requested_by_user_id: req.user.id,
         status: 'pending',
       })
       .onConflict(['event_id', 'artist_profile_id'])
       .merge({
+        claim_type: claimType,
         requested_by_user_id: req.user.id,
         status: 'pending',
         reviewed_by_user_id: null,
@@ -678,9 +747,11 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
       claim,
       event,
       message: 'Claim request sent for admin review.',
-      prompt: 'Your claim request was sent. Once an admin approves it, this event will appear on your artist profile and you will be able to edit the full listing.',
+      prompt: claimType === 'venue'
+        ? 'Your venue claim request was sent. Once an admin approves it, this event will be connected to your venue profile and you will be able to edit the full listing.'
+        : 'Your claim request was sent. Once an admin approves it, this event will appear on your artist profile and you will be able to edit the full listing.',
       image_hint: isGenericImportedPoster(event)
-        ? 'This event is using a generic promoter image. Add an artist photo or show poster after the claim is approved.'
+        ? 'This event is using a generic promoter image. Add a real show poster or profile photo after the claim is approved.'
         : null,
     });
   } catch (error) {

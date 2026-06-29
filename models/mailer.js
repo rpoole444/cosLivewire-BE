@@ -368,6 +368,8 @@ exports.sendEventSubmissionDigestEmail = async ({ to, events = [], user }) => {
   });
 };
 
+const claimProfileLabel = (claim) => claim?.claim_type === "venue" ? "Venue profile" : "Artist profile";
+
 exports.buildClaimSubmittedEmailHtml = ({ claim, event, artist }) => baseEmailShell({
   title: "Claim request submitted",
   body: `
@@ -376,7 +378,7 @@ exports.buildClaimSubmittedEmailHtml = ({ claim, event, artist }) => baseEmailSh
     </p>
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
       ${fieldRow("Event", escapeHtml(event?.title || "Untitled event"))}
-      ${fieldRow("Artist profile", escapeHtml(artist?.display_name || "Artist profile"))}
+      ${fieldRow(claimProfileLabel(claim), escapeHtml(artist?.display_name || claimProfileLabel(claim)))}
       ${fieldRow("Status", escapeHtml(claim?.status || "pending"))}
     </table>
   `,
@@ -399,11 +401,11 @@ exports.buildClaimReviewedEmailHtml = ({ claim, event, artist, approved, adminNo
     <p style="margin:0 0 16px;color:#c9c0a0;font-size:15px;line-height:1.6">
       ${approved
         ? "Your claim was approved. You can now edit this listing and make it stronger."
-        : "Your claim request was reviewed and not approved."}
+      : "Your claim request was reviewed and not approved."}
     </p>
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;background:#0b0f14;border:1px solid #263f38">
       ${fieldRow("Event", escapeHtml(event?.title || "Untitled event"))}
-      ${fieldRow("Artist profile", escapeHtml(artist?.display_name || "Artist profile"))}
+      ${fieldRow(claimProfileLabel(claim), escapeHtml(artist?.display_name || claimProfileLabel(claim)))}
       ${fieldRow("Status", approved ? "Approved" : "Rejected")}
       ${adminNotes ? fieldRow("Admin notes", escapeHtml(adminNotes)) : ""}
     </table>
