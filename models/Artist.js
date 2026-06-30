@@ -28,11 +28,19 @@ const selectPublicEventFields = [
   'venue_profile.display_name as venue_profile_display_name',
 ];
 
+const venueSqlNormalize = (columnOrPlaceholder) => (
+  `TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(${columnOrPlaceholder}), '&', ' and ', 'g'), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g'))`
+);
+
 const applyProfileEventMatch = (builder, artist) => {
   if (artist.profile_type === 'venue') {
     builder
       .where({ 'events.venue_profile_id': artist.id })
-      .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name]);
+      .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name])
+      .orWhereRaw(
+        `${venueSqlNormalize('events.venue_name')} LIKE CONCAT('%', ${venueSqlNormalize('?')}, '%') OR ${venueSqlNormalize('?')} LIKE CONCAT('%', ${venueSqlNormalize('events.venue_name')}, '%')`,
+        [artist.display_name, artist.display_name]
+      );
     return;
   }
 

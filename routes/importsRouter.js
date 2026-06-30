@@ -293,12 +293,13 @@ const createImportBatch = async (req, res, source) => {
         venueProfileId: event.venue_profile_id || profileDefaults.venue_profile_id,
         venueName: event.venue_name || profileDefaults.venue_name,
       });
+      const resolvedVenueName = venueProfile?.display_name || event.venue_name || profileDefaults.venue_name || null;
       const eventWithDefaults = {
         ...event,
         artist_display: event.artist_display || profileDefaults.artist_display,
         artist_profile_id: event.artist_profile_id || profileDefaults.artist_profile_id,
-        venue_name: event.venue_name || profileDefaults.venue_name || venueProfile?.display_name || null,
-        location: event.location || profileDefaults.location || event.venue_name || profileDefaults.venue_name || venueProfile?.display_name || null,
+        venue_name: resolvedVenueName,
+        location: event.location || profileDefaults.location || resolvedVenueName,
         address: event.address || profileDefaults.address || venueProfile?.venue_address || null,
         city: event.city || profileDefaults.city || venueProfile?.venue_city || null,
         website: event.website || profileDefaults.website || venueProfile?.website || null,
@@ -310,7 +311,7 @@ const createImportBatch = async (req, res, source) => {
           profileDefaultPoster: profileDefaults.poster,
           sourceDefaultPoster: sourceConfig.defaultPoster,
         }),
-        venue_profile_id: event.venue_profile_id || profileDefaults.venue_profile_id || venueProfile?.id || null,
+        venue_profile_id: venueProfile?.id || event.venue_profile_id || profileDefaults.venue_profile_id || null,
         region: event.region || profileDefaults.region || venueProfile?.home_region || sourceConfig.defaultRegion || DEFAULT_REGION,
       };
 
@@ -389,6 +390,43 @@ const createImportBatch = async (req, res, source) => {
 
 importsRouter.post('/moondog', requireAdmin, (req, res) => createImportBatch(req, res, 'moondog'));
 importsRouter.post('/profile', ensureAuth, (req, res) => createImportBatch(req, res, 'profile'));
+
+importsRouter.get('/recent', ensureAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 50);
+    const query = knex('import_batches as ib')
+      .leftJoin('import_events as ie', 'ie.batch_id', 'ib.id')
+      .select(
+        'ib.id',
+        'ib.source',
+        'ib.source_name',
+        'ib.source_url',
+        'ib.status',
+        'ib.created_at',
+        'ib.completed_at',
+        'ib.created_by_user_id',
+        knex.raw('COUNT(ie.id)::int as event_count'),
+        knex.raw("COUNT(*) FILTER (WHERE ie.status = 'pending')::int as pending_count"),
+        knex.raw("COUNT(*) FILTER (WHERE ie.status = 'accepted' AND ie.promoted_event_id IS NULL)::int as accepted_count"),
+        knex.raw("COUNT(*) FILTER (WHERE ie.status = 'rejected')::int as rejected_count"),
+        knex.raw('COUNT(ie.promoted_event_id)::int as promoted_count'),
+        knex.raw('MAX(COALESCE(ie.accepted_at, ie.rejected_at, ib.completed_at, ie.created_at, ib.created_at)) as last_activity_at')
+      )
+      .groupBy('ib.id')
+      .orderBy('last_activity_at', 'desc')
+      .limit(limit);
+
+    if (!req.user?.is_admin) {
+      query.where({ 'ib.created_by_user_id': req.user?.id });
+    }
+
+    const batches = await query;
+    return res.json({ batches });
+  } catch (error) {
+    console.error('Error loading recent import batches:', error);
+    return res.status(500).json({ message: 'Unable to load recent import batches.' });
+  }
+});
 
 importsRouter.post('/shell-profiles', requireAdmin, async (req, res) => {
   try {
@@ -754,6 +792,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           venueName: event.venue_name,
         });
         const venueProfileId = venueProfile?.id || null;
+        const canonicalVenueName = venueProfile?.display_name || event.venue_name || null;
         const poster = resolveImportPoster({
           explicitPoster: event.poster,
           venueProfile,
@@ -776,7 +815,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             duplicateSkippedCount += 1;
             skippedEvents.push({
               title,
-              venue_name: event.venue_name,
+              venue_name: canonicalVenueName,
               location: event.location,
               date: finalDate,
               start_time: finalStartTime,
@@ -813,7 +852,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             age_restriction: event.age_policy || null,
             website_link: event.website_link || null,
             is_approved: false,
-            venue_name: event.venue_name || null,
+            venue_name: canonicalVenueName,
             venue_profile_id: venueProfileId,
             artist_profile_id: artistProfileId,
             website: event.website || null,
@@ -837,8 +876,8 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             : {
                 id: promotedEventId,
                 title,
-                venue_name: event.venue_name || null,
-                location: event.location || event.venue_name || null,
+                venue_name: canonicalVenueName,
+                location: event.location || canonicalVenueName || null,
                 date: finalDate,
                 start_time: finalStartTime,
                 region: normalizeRegion(
