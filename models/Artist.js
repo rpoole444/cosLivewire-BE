@@ -117,7 +117,7 @@ const Artist = {
     if (!artist) return null;
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
-    const events = await knex('events')
+    const eventsQuery = knex('events')
       .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
       .select('events.*', 'venue_profile.profile_image as venue_profile_image', 'venue_profile.display_name as venue_profile_display_name')
       .where({ 'events.is_approved': true })
@@ -125,7 +125,14 @@ const Artist = {
         applyProfileEventMatch(this, artist);
       })
       .andWhere('events.date', '>=', today)
-      .orderBy('events.date');
+      .orderBy('events.date')
+      .orderBy('events.start_time');
+
+    if (artist.profile_type === 'venue' && artist.is_shell) {
+      eventsQuery.limit(5);
+    }
+
+    const events = await eventsQuery;
 
     const pastEvents = artist.profile_type === 'venue'
       ? await knex('events')
