@@ -14,6 +14,8 @@ assert.strictEqual(venueNamesMatch('The Black Sheep Colorado', 'The Black Sheep'
 assert.strictEqual(venueNamesMatch("Louie Louie's", "Louie Louie's Piano Bar"), true);
 assert.strictEqual(venueNamesMatch('Mill Hill Saloon', "Bloom's Mill Hill Saloon"), true);
 assert.strictEqual(venueNamesMatch("Lulu's", "Lulu's Downstairs"), true);
+assert.strictEqual(venueNamesMatch("Lulu's Downtown", "Lulu's Downstairs"), true);
 assert.strictEqual(venueNamesMatch('Mission Ballroom', 'Dazzle'), false);
+assert.strictEqual(venueNamesMatch('Boulder Theater', 'Boulder Cafe'), false);
 
 console.log('venueProfiles tests passed.');

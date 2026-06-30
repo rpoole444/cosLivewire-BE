@@ -21,6 +21,48 @@ const normalizeVenueLookupName = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const GENERIC_SHARED_NAME_TOKENS = new Set([
+  'auditorium',
+  'bar',
+  'boulder',
+  'cafe',
+  'city',
+  'club',
+  'colorado',
+  'denver',
+  'downtown',
+  'downstairs',
+  'hall',
+  'hotel',
+  'lounge',
+  'music',
+  'park',
+  'pavilion',
+  'piano',
+  'pueblo',
+  'room',
+  'saloon',
+  'springs',
+  'stage',
+  'theater',
+  'theatre',
+  'upstairs',
+  'venue',
+]);
+
+const getDistinctiveSharedLeadToken = (left, right) => {
+  const leftTokens = left.split(' ').filter(Boolean);
+  const rightTokens = right.split(' ').filter(Boolean);
+  if (!leftTokens.length || !rightTokens.length) return null;
+
+  const sharedTokens = leftTokens.filter((token) => rightTokens.includes(token));
+  return sharedTokens.find((token) => (
+    token.length >= 5 &&
+    !GENERIC_SHARED_NAME_TOKENS.has(token) &&
+    (token === leftTokens[0] || token === rightTokens[0])
+  )) || null;
+};
+
 const venueNamesMatch = (left, right) => {
   const normalizedLeft = normalizeVenueLookupName(left);
   const normalizedRight = normalizeVenueLookupName(right);
@@ -28,7 +70,8 @@ const venueNamesMatch = (left, right) => {
   return (
     normalizedLeft === normalizedRight ||
     normalizedLeft.includes(normalizedRight) ||
-    normalizedRight.includes(normalizedLeft)
+    normalizedRight.includes(normalizedLeft) ||
+    Boolean(getDistinctiveSharedLeadToken(normalizedLeft, normalizedRight))
   );
 };
 

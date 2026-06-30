@@ -34,12 +34,18 @@ const venueSqlNormalize = (columnOrPlaceholder) => (
 
 const applyProfileEventMatch = (builder, artist) => {
   if (artist.profile_type === 'venue') {
+    const eventVenueName = venueSqlNormalize('events.venue_name');
+    const profileVenueName = venueSqlNormalize('?');
+
     builder
       .where({ 'events.venue_profile_id': artist.id })
       .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name])
       .orWhereRaw(
-        `${venueSqlNormalize('events.venue_name')} LIKE CONCAT('%', ${venueSqlNormalize('?')}, '%') OR ${venueSqlNormalize('?')} LIKE CONCAT('%', ${venueSqlNormalize('events.venue_name')}, '%')`,
-        [artist.display_name, artist.display_name]
+        `${eventVenueName} <> '' AND ${profileVenueName} <> '' AND (` +
+          `${eventVenueName} LIKE CONCAT('%', ${profileVenueName}, '%') OR ` +
+          `${profileVenueName} LIKE CONCAT('%', ${eventVenueName}, '%')` +
+        ')',
+        [artist.display_name, artist.display_name, artist.display_name]
       );
     return;
   }

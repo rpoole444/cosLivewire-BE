@@ -12,7 +12,7 @@ const {
   findDuplicateCandidates,
   jaccardSimilarity,
 } = require('../utils/eventDuplicateDetection');
-const { attachEventImageFields } = require('../utils/eventImages');
+const { attachEventImageFields, isDefaultImage } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
 const { sendImportBatchSummaryEmail } = require('../models/mailer');
 
@@ -74,6 +74,9 @@ const cleanPosterInput = (value) => {
   const cleaned = cleanOptionalImportText(value, 255);
   if (!cleaned) return null;
   if (['tbd', 'tba', 'n/a', 'na', 'none', 'null'].includes(cleaned.toLowerCase())) {
+    return null;
+  }
+  if (isDefaultImage(cleaned)) {
     return null;
   }
   return cleaned;
