@@ -42,10 +42,11 @@ const normalizeDate = (value) => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
   }
+  if (value instanceof Date) return null;
   const text = String(value);
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
   const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? text.slice(0, 10) : parsed.toISOString().slice(0, 10);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 };
 
 const timeDistanceMinutes = (left, right) => {
@@ -119,7 +120,7 @@ const duplicateWarningForLevel = (level) => {
 
 const findDuplicateCandidates = async (db, incomingEvents, { daysBack = 60, daysForward = 370 } = {}) => {
   const events = Array.isArray(incomingEvents) ? incomingEvents : [incomingEvents].filter(Boolean);
-  const dates = events.map((event) => event.date).filter(Boolean).map((date) => String(date).slice(0, 10));
+  const dates = events.map((event) => normalizeDate(event.date)).filter(Boolean);
   if (!dates.length) return new Map();
 
   const minDate = dates.reduce((min, date) => (date < min ? date : min), dates[0]);
@@ -160,5 +161,6 @@ module.exports = {
   findDuplicateCandidates,
   jaccardSimilarity,
   normalizeComparableText,
+  normalizeDate,
   scorePotentialDuplicate,
 };

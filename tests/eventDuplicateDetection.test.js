@@ -1,7 +1,9 @@
 const assert = require('assert');
 const {
+  findDuplicateCandidates,
   jaccardSimilarity,
   normalizeComparableText,
+  normalizeDate,
   scorePotentialDuplicate,
 } = require('../utils/eventDuplicateDetection');
 
@@ -48,4 +50,28 @@ const differentDate = scorePotentialDuplicate(
 
 assert.strictEqual(differentDate, null);
 
-console.log('eventDuplicateDetection tests passed.');
+assert.strictEqual(normalizeDate(new Date('not-a-date')), null);
+assert.strictEqual(normalizeDate('not-a-date'), null);
+assert.strictEqual(normalizeDate('2026-07-01T00:00:00.000Z'), '2026-07-01');
+
+(async () => {
+  const emptyDuplicateResults = await findDuplicateCandidates(
+    () => {
+      throw new Error('duplicate lookup should not run without valid dates');
+    },
+    [
+      {
+        title: 'Bad staged import row',
+        venue_name: 'Vultures',
+        date: new Date('not-a-date'),
+        start_time: '20:00:00',
+      },
+    ]
+  );
+
+  assert.strictEqual(emptyDuplicateResults.size, 0);
+  console.log('eventDuplicateDetection tests passed.');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
