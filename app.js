@@ -90,6 +90,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/artists', artistRouter);
 app.use('/api/invites', inviteRouter);
 app.use('/api/payments', stripeRouter);
+app.use('/api/imports', importsRouter);
 app.use('/api/admin', requireAdmin);
 app.use('/api/admin/imports', importsRouter);
 app.use('/api/admin/venue-photo-maintenance', venuePhotoMaintenanceRouter);

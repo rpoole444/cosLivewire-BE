@@ -4,6 +4,7 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
+const { mapGoogleCalendarEvents } = require('../utils/googleCalendarImport');
 const { ensureAuth, requireAdmin } = require('../middleware/auth');
 const { DEFAULT_REGION, normalizeRegion, inferRegionFromText } = require('../utils/regions');
 const { findVenueProfileByInput, normalizeVenueName } = require('../utils/venueProfiles');
@@ -39,7 +40,15 @@ const SOURCE_CONFIG = {
     defaultRegion: DEFAULT_REGION,
     defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
   },
+  google_calendar: {
+    label: 'Imported from Google Calendar',
+    ownerEmail: null,
+    defaultRegion: DEFAULT_REGION,
+    defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
+  },
 };
+
+const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 
 const normalizeInsertedId = (insertResult) => {
   if (!Array.isArray(insertResult)) return insertResult;
@@ -190,11 +199,21 @@ const canManageBatch = (req, batch) => (
   )
 );
 
-const createImportBatch = async (req, res, source) => {
+const createImportBatchFromParsedEvents = async (
+  req,
+  res,
+  source,
+  parsedEvents,
+  {
+    rawText,
+    defaults = {},
+    sourceName,
+    sourceUrl,
+  } = {}
+) => {
   try {
-    const { raw_text, defaults = {}, source_name, source_url } = req.body;
-    if (!raw_text || typeof raw_text !== 'string') {
-      return res.status(400).json({ message: 'raw_text is required' });
+    if (!Array.isArray(parsedEvents)) {
+      return res.status(400).json({ message: 'Parsed events are required.' });
     }
 
     const sourceConfig = SOURCE_CONFIG[source];
@@ -210,7 +229,6 @@ const createImportBatch = async (req, res, source) => {
       console.warn('promoter_unassigned');
     }
 
-    const parsedEvents = parseMoondogCalendar(raw_text);
     const duplicateRejectedRows = await getDuplicateRejectedRows(source, parsedEvents);
     const ownerPolicy = defaults.owner_policy === 'personal_calendar' ? 'personal_calendar' : 'no_owner';
     const ownerUserId = ownerPolicy === 'personal_calendar' ? req.user?.id || null : null;
@@ -335,9 +353,9 @@ const createImportBatch = async (req, res, source) => {
       const insertedBatch = await trx('import_batches')
         .insert({
           source,
-          source_name: cleanOptionalImportText(source_name || defaults.source_name, 160),
-        source_url: cleanOptionalImportText(source_url || defaults.source_url, 500),
-          raw_text,
+          source_name: cleanOptionalImportText(sourceName || defaults.source_name, 160),
+          source_url: cleanOptionalImportText(sourceUrl || defaults.source_url, 500),
+          raw_text: rawText || '',
           created_by_user_id: req.user?.id || null,
         })
         .returning('id');
@@ -357,6 +375,7 @@ const createImportBatch = async (req, res, source) => {
         start_at: event.start_at,
         date: event.date,
         start_time: event.start_time,
+        end_time: event.end_time || null,
         region: event.region,
         venue_profile_id: event.venue_profile_id || null,
         location: event.location || null,
@@ -391,8 +410,326 @@ const createImportBatch = async (req, res, source) => {
   }
 };
 
+const createImportBatch = async (req, res, source) => {
+  const { raw_text, defaults = {}, source_name, source_url } = req.body;
+  if (!raw_text || typeof raw_text !== 'string') {
+    return res.status(400).json({ message: 'raw_text is required' });
+  }
+
+  const parsedEvents = parseMoondogCalendar(raw_text);
+  return createImportBatchFromParsedEvents(req, res, source, parsedEvents, {
+    rawText: raw_text,
+    defaults,
+    sourceName: source_name,
+    sourceUrl: source_url,
+  });
+};
+
+const getFrontendBaseUrl = () => (
+  process.env.FRONTEND_BASE_URL ||
+  process.env.FRONTEND_URL ||
+  process.env.CORS_ORIGIN ||
+  'https://app.alpinegrooveguide.com'
+).replace(/\/+$/, '');
+
+const getBackendBaseUrl = (req) => (
+  process.env.BACKEND_BASE_URL ||
+  process.env.API_BASE_URL ||
+  `${req.protocol}://${req.get('host')}`
+).replace(/\/+$/, '');
+
+const getGoogleRedirectUri = (req) => (
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI ||
+  `${getBackendBaseUrl(req)}/api/imports/google/callback`
+);
+
+const getGoogleConfig = (req) => {
+  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = getGoogleRedirectUri(req);
+  return { clientId, clientSecret, redirectUri };
+};
+
+const requireGoogleConfig = (req, res) => {
+  const config = getGoogleConfig(req);
+  if (!config.clientId || !config.clientSecret) {
+    res.status(500).json({
+      message: 'Google Calendar import is not configured yet. Add GOOGLE_CALENDAR_CLIENT_ID and GOOGLE_CALENDAR_CLIENT_SECRET.',
+    });
+    return null;
+  }
+  return config;
+};
+
+const googleAuthHeaders = (req) => {
+  const token = req.session?.googleCalendar?.access_token;
+  if (!token) return null;
+  return { Authorization: `Bearer ${token}` };
+};
+
+const isGoogleTokenExpired = (req) => {
+  const expiresAt = req.session?.googleCalendar?.expires_at;
+  return !expiresAt || Date.now() > Number(expiresAt) - 60_000;
+};
+
+const refreshGoogleAccessToken = async (req) => {
+  const refreshToken = req.session?.googleCalendar?.refresh_token;
+  if (!refreshToken) return false;
+
+  const { clientId, clientSecret } = getGoogleConfig(req);
+  if (!clientId || !clientSecret) return false;
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.access_token) {
+    req.session.googleCalendar = null;
+    return false;
+  }
+
+  req.session.googleCalendar = {
+    ...req.session.googleCalendar,
+    access_token: data.access_token,
+    expires_at: Date.now() + Number(data.expires_in || 3600) * 1000,
+  };
+  return true;
+};
+
+const ensureGoogleCalendarToken = async (req, res) => {
+  if (!req.session?.googleCalendar?.access_token) {
+    res.status(401).json({ message: 'Connect Google Calendar before importing.' });
+    return false;
+  }
+
+  if (isGoogleTokenExpired(req)) {
+    const refreshed = await refreshGoogleAccessToken(req);
+    if (!refreshed) {
+      res.status(401).json({ message: 'Google Calendar access expired. Reconnect Google Calendar.' });
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const fetchGoogleJson = async (req, url) => {
+  const headers = googleAuthHeaders(req);
+  if (!headers) {
+    const error = new Error('Google Calendar is not connected.');
+    error.status = 401;
+    throw error;
+  }
+
+  const response = await fetch(url, { headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || data?.message || 'Google Calendar request failed.');
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+};
+
 importsRouter.post('/moondog', requireAdmin, (req, res) => createImportBatch(req, res, 'moondog'));
 importsRouter.post('/profile', ensureAuth, (req, res) => createImportBatch(req, res, 'profile'));
+
+importsRouter.get('/google/status', ensureAuth, async (req, res) => {
+  const connected = Boolean(req.session?.googleCalendar?.access_token);
+  return res.json({
+    connected,
+    expires_at: req.session?.googleCalendar?.expires_at || null,
+  });
+});
+
+importsRouter.get('/google/connect', ensureAuth, async (req, res) => {
+  const config = requireGoogleConfig(req, res);
+  if (!config) return;
+
+  const state = `${req.user.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  req.session.googleCalendarOAuthState = state;
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: 'code',
+    scope: GOOGLE_CALENDAR_SCOPE,
+    access_type: 'offline',
+    include_granted_scopes: 'true',
+    prompt: 'consent',
+    state,
+  });
+
+  return res.json({
+    authUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+  });
+});
+
+importsRouter.get('/google/callback', ensureAuth, async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+    const redirectBase = `${getFrontendBaseUrl()}/admin/import`;
+    if (error) {
+      return res.redirect(`${redirectBase}?google=error&message=${encodeURIComponent(String(error))}`);
+    }
+    if (!code || !state || state !== req.session?.googleCalendarOAuthState) {
+      return res.redirect(`${redirectBase}?google=error&message=${encodeURIComponent('Invalid Google Calendar OAuth response.')}`);
+    }
+
+    const config = getGoogleConfig(req);
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: config.redirectUri,
+        code: String(code),
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.access_token) {
+      return res.redirect(`${redirectBase}?google=error&message=${encodeURIComponent(data?.error_description || 'Unable to connect Google Calendar.')}`);
+    }
+
+    req.session.googleCalendarOAuthState = null;
+    req.session.googleCalendar = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || req.session.googleCalendar?.refresh_token || null,
+      expires_at: Date.now() + Number(data.expires_in || 3600) * 1000,
+      scope: data.scope || GOOGLE_CALENDAR_SCOPE,
+      connected_at: new Date().toISOString(),
+    };
+
+    return res.redirect(`${redirectBase}?google=connected`);
+  } catch (err) {
+    console.error('Google Calendar callback failed:', err);
+    return res.redirect(`${getFrontendBaseUrl()}/admin/import?google=error&message=${encodeURIComponent('Google Calendar connection failed.')}`);
+  }
+});
+
+importsRouter.delete('/google/disconnect', ensureAuth, async (req, res) => {
+  req.session.googleCalendar = null;
+  req.session.googleCalendarOAuthState = null;
+  return res.json({ connected: false });
+});
+
+importsRouter.get('/google/calendars', ensureAuth, async (req, res) => {
+  try {
+    if (!(await ensureGoogleCalendarToken(req, res))) return;
+    const data = await fetchGoogleJson(
+      req,
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader'
+    );
+    const calendars = Array.isArray(data.items) ? data.items.map((calendar) => ({
+      id: calendar.id,
+      summary: calendar.summary,
+      description: calendar.description || null,
+      primary: Boolean(calendar.primary),
+      accessRole: calendar.accessRole,
+      backgroundColor: calendar.backgroundColor || null,
+    })) : [];
+    return res.json({ calendars });
+  } catch (err) {
+    console.error('Google Calendar list failed:', err);
+    return res.status(err.status || 500).json({ message: err.message || 'Unable to load Google calendars.' });
+  }
+});
+
+importsRouter.get('/google/events', ensureAuth, async (req, res) => {
+  try {
+    if (!(await ensureGoogleCalendarToken(req, res))) return;
+    const calendarId = String(req.query.calendarId || '').trim();
+    const timeMin = String(req.query.timeMin || '').trim();
+    const timeMax = String(req.query.timeMax || '').trim();
+    const calendarSummary = cleanOptionalImportText(req.query.calendarSummary, 160);
+
+    if (!calendarId || !timeMin || !timeMax) {
+      return res.status(400).json({ message: 'calendarId, timeMin, and timeMax are required.' });
+    }
+
+    const params = new URLSearchParams({
+      timeMin: dayjs(timeMin).toISOString(),
+      timeMax: dayjs(timeMax).toISOString(),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '250',
+      showDeleted: 'false',
+    });
+    const encodedCalendarId = encodeURIComponent(calendarId);
+    const data = await fetchGoogleJson(
+      req,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events?${params.toString()}`
+    );
+
+    const events = mapGoogleCalendarEvents(Array.isArray(data.items) ? data.items : [], {
+      calendarId,
+      calendarSummary,
+    });
+    const duplicateCandidates = await findDuplicateCandidates(knex, events);
+    const previewEvents = events.map((event, index) => ({
+      ...event,
+      duplicate_warnings: (duplicateCandidates.get(index) || []).map((match) => ({
+        level: match.level,
+        reason: match.reason,
+        existing_event_id: match.event?.id || null,
+        existing_title: match.event?.title || null,
+      })),
+    }));
+
+    return res.json({ events: previewEvents });
+  } catch (err) {
+    console.error('Google Calendar events preview failed:', err);
+    return res.status(err.status || 500).json({ message: err.message || 'Unable to load Google Calendar events.' });
+  }
+});
+
+importsRouter.post('/google/stage', ensureAuth, async (req, res) => {
+  const {
+    events = [],
+    defaults = {},
+    calendar_id,
+    calendar_summary,
+    source_url,
+  } = req.body || {};
+
+  if (!Array.isArray(events) || !events.length) {
+    return res.status(400).json({ message: 'Select at least one Google Calendar event to import.' });
+  }
+
+  const parsedEvents = events
+    .slice(0, 250)
+    .map((event) => ({
+      ...event,
+      parse_warnings: Array.isArray(event.parse_warnings) ? event.parse_warnings : [],
+      raw_block: event.raw_block || JSON.stringify({
+        google_event_id: event.google_event_id || null,
+        google_calendar_id: calendar_id || event.google_calendar_id || null,
+        calendar_summary: calendar_summary || event.calendar_summary || null,
+      }),
+    }));
+
+  return createImportBatchFromParsedEvents(req, res, 'google_calendar', parsedEvents, {
+    rawText: JSON.stringify({
+      calendar_id,
+      calendar_summary,
+      imported_event_count: parsedEvents.length,
+    }),
+    defaults,
+    sourceName: calendar_summary ? `Google Calendar: ${calendar_summary}` : 'Google Calendar import',
+    sourceUrl: source_url || null,
+  });
+});
 
 importsRouter.get('/recent', ensureAuth, async (req, res) => {
   try {
