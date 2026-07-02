@@ -12,6 +12,7 @@ const {
   duplicateWarningForLevel,
   findDuplicateCandidates,
   jaccardSimilarity,
+  scorePotentialDuplicate,
 } = require('../utils/eventDuplicateDetection');
 const { attachEventImageFields, isDefaultImage } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
@@ -564,9 +565,12 @@ importsRouter.get('/google/connect', ensureAuth, async (req, res) => {
     scope: GOOGLE_CALENDAR_SCOPE,
     access_type: 'offline',
     include_granted_scopes: 'true',
-    prompt: 'consent',
+    prompt: 'select_account consent',
     state,
   });
+  if (req.user?.email) {
+    params.set('login_hint', String(req.user.email).trim().toLowerCase());
+  }
 
   return res.json({
     authUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
@@ -1173,6 +1177,69 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
               });
             continue;
           }
+        }
+
+        const duplicateMatches = await trx('events as events')
+          .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+          .select(
+            'events.id',
+            'events.title',
+            'events.slug',
+            'events.date',
+            'events.start_time',
+            'events.venue_name',
+            'events.location',
+            'events.region',
+            'events.source',
+            'events.source_label',
+            'events.source_fingerprint',
+            'events.venue_profile_id',
+            'venue_profile.display_name as venue_profile_display_name'
+          )
+          .where('events.date', finalDate);
+
+        const duplicateMatch = duplicateMatches
+          .map((existing) => {
+            const match = scorePotentialDuplicate(
+              {
+                ...event,
+                title,
+                venue_name: canonicalVenueName,
+                venue_profile_display_name: venueProfile?.display_name || event.venue_profile_display_name || null,
+                date: finalDate,
+                start_time: finalStartTime,
+                source_url: event.source_url || event.website_link || event.website || null,
+                fingerprint: sourceFingerprint,
+              },
+              existing
+            );
+            return match ? { ...match, event: existing } : null;
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.score - a.score)
+          .find((match) => match.level === 'exact' || match.level === 'likely');
+
+        if (duplicateMatch?.event?.id) {
+          duplicateSkippedCount += 1;
+          skippedEvents.push({
+            title,
+            venue_name: canonicalVenueName,
+            location: event.location,
+            date: finalDate,
+            start_time: finalStartTime,
+            reason: `Duplicate existing event (${duplicateMatch.reason})`,
+          });
+          await trx('import_events')
+            .where({ id: event.id })
+            .update({
+              status: 'rejected',
+              promoted_event_id: duplicateMatch.event.id,
+              parse_warnings: JSON.stringify([
+                ...parseWarningsField(event.parse_warnings),
+                duplicateWarningForLevel(duplicateMatch.level),
+              ]),
+            });
+          continue;
         }
 
         const rows = await trx('events')

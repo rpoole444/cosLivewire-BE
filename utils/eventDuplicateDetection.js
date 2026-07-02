@@ -28,6 +28,26 @@ const jaccardSimilarity = (left, right) => {
   return intersection / (a.size + b.size - intersection);
 };
 
+const venueSimilarity = (left, right) => {
+  const normalizedLeft = normalizeComparableText(left);
+  const normalizedRight = normalizeComparableText(right);
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft === normalizedRight) return 1;
+
+  const a = tokenSet(normalizedLeft);
+  const b = tokenSet(normalizedRight);
+  if (!a.size || !b.size) return 0;
+
+  let intersection = 0;
+  a.forEach((token) => {
+    if (b.has(token)) intersection += 1;
+  });
+
+  const coverage = intersection / Math.min(a.size, b.size);
+  const jaccard = intersection / (a.size + b.size - intersection);
+  return Math.max(jaccard, coverage >= 1 ? 0.95 : coverage >= 0.75 ? 0.86 : coverage);
+};
+
 const normalizeTime = (value) => {
   if (!value) return null;
   const [hours, minutes = '0'] = String(value).split(':');
@@ -57,7 +77,13 @@ const timeDistanceMinutes = (left, right) => {
 };
 
 const eventDisplayTitle = (event) => event.title || event.artist_display || event.artist || '';
-const eventVenueName = (event) => event.venue_name || event.venue || event.location || '';
+const eventVenueName = (event) => (
+  event.venue_profile_display_name ||
+  event.venue_name ||
+  event.venue ||
+  event.location ||
+  ''
+);
 const eventArtistName = (event) => event.artist_display || event.artist || event.title || '';
 
 const scorePotentialDuplicate = (incoming, existing) => {
@@ -78,33 +104,52 @@ const scorePotentialDuplicate = (incoming, existing) => {
     return null;
   }
 
-  const venueScore = jaccardSimilarity(eventVenueName(incoming), existing.venue_name || existing.location || '');
+  const venueScore = venueSimilarity(eventVenueName(incoming), existing.venue_name || existing.location || '');
+  const venueProfileScore = venueSimilarity(eventVenueName(incoming), existing.venue_profile_display_name || '');
+  const bestVenueScore = Math.max(venueScore, venueProfileScore);
   const titleScore = jaccardSimilarity(eventDisplayTitle(incoming), existing.title || '');
   const artistScore = jaccardSimilarity(eventArtistName(incoming), existing.title || existing.genre || '');
+  const titleArtistScore = Math.max(titleScore, artistScore);
   const timeDistance = timeDistanceMinutes(incoming.start_time, existing.start_time);
   const closeTime = timeDistance === null ? false : timeDistance <= 45;
   const exactTime = timeDistance === 0;
 
-  if (venueScore >= 0.9 && exactTime && (titleScore >= 0.72 || artistScore >= 0.72)) {
+  if (bestVenueScore >= 0.9 && exactTime && titleArtistScore >= 0.72) {
     return {
       level: 'likely',
-      score: Math.max(titleScore, artistScore, venueScore),
+      score: Math.max(titleArtistScore, bestVenueScore),
       reason: 'same_venue_date_time_similar_title',
     };
   }
 
-  if (venueScore >= 0.72 && closeTime && (titleScore >= 0.55 || artistScore >= 0.55)) {
+  if (bestVenueScore >= 0.9 && exactTime && titleArtistScore >= 0.3) {
+    return {
+      level: 'likely',
+      score: Math.max(0.86, titleArtistScore, bestVenueScore),
+      reason: 'same_venue_date_time_related_title',
+    };
+  }
+
+  if (bestVenueScore >= 0.9 && exactTime) {
     return {
       level: 'possible',
-      score: Math.max(titleScore, artistScore, venueScore),
+      score: Math.max(0.72, bestVenueScore),
+      reason: 'same_venue_date_time',
+    };
+  }
+
+  if (bestVenueScore >= 0.72 && closeTime && titleArtistScore >= 0.55) {
+    return {
+      level: 'possible',
+      score: Math.max(titleArtistScore, bestVenueScore),
       reason: 'similar_venue_date_close_time',
     };
   }
 
-  if (exactTime && (titleScore >= 0.82 || artistScore >= 0.82)) {
+  if (exactTime && titleArtistScore >= 0.82) {
     return {
       level: 'possible',
-      score: Math.max(titleScore, artistScore),
+      score: titleArtistScore,
       reason: 'same_date_time_similar_title',
     };
   }
@@ -131,7 +176,22 @@ const findDuplicateCandidates = async (db, incomingEvents, { daysBack = 60, days
   endDate.setUTCSeconds(endDate.getUTCSeconds() + (daysForward * DAY_SECONDS));
 
   const existingEvents = await db('events')
-    .select('id', 'title', 'slug', 'date', 'start_time', 'venue_name', 'location', 'region', 'source', 'source_label', 'source_fingerprint')
+    .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
+    .select(
+      'events.id',
+      'events.title',
+      'events.slug',
+      'events.date',
+      'events.start_time',
+      'events.venue_name',
+      'events.location',
+      'events.region',
+      'events.source',
+      'events.source_label',
+      'events.source_fingerprint',
+      'events.venue_profile_id',
+      'venue_profile.display_name as venue_profile_display_name'
+    )
     .whereBetween('date', [
       startDate.toISOString().slice(0, 10),
       endDate.toISOString().slice(0, 10),
@@ -163,4 +223,5 @@ module.exports = {
   normalizeComparableText,
   normalizeDate,
   scorePotentialDuplicate,
+  venueSimilarity,
 };

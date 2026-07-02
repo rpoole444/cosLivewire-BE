@@ -33,6 +33,47 @@ const likely = scorePotentialDuplicate(
 assert(likely, 'expected likely duplicate match');
 assert.strictEqual(likely.level, 'likely');
 
+const differentlyNamedSameShow = scorePotentialDuplicate(
+  {
+    title: 'Scoop Of Jazz with Poole & the Gang',
+    artist_display: 'Scoop Of Jazz with Poole & the Gang',
+    venue_name: 'The Mining Exchange Hotel',
+    date: '2026-07-09',
+    start_time: '19:00:00',
+  },
+  {
+    title: 'Mining Exchange with Poole and the Gang',
+    venue_name: null,
+    venue_profile_display_name: 'Mining Exchange',
+    location: '8 S Nevada Ave, Colorado Springs, CO',
+    date: '2026-07-09',
+    start_time: '19:00:00',
+  }
+);
+
+assert(differentlyNamedSameShow, 'expected venue/time match to catch rephrased duplicate');
+assert.strictEqual(differentlyNamedSameShow.level, 'likely');
+assert.strictEqual(differentlyNamedSameShow.reason, 'same_venue_date_time_related_title');
+
+const sameVenueTimeUnrelatedTitle = scorePotentialDuplicate(
+  {
+    title: 'Open Mic Night',
+    artist_display: 'Open Mic Night',
+    venue_name: 'Mining Exchange',
+    date: '2026-07-09',
+    start_time: '19:00:00',
+  },
+  {
+    title: 'Classical Brunch',
+    venue_profile_display_name: 'The Mining Exchange Hotel',
+    date: '2026-07-09',
+    start_time: '19:00:00',
+  }
+);
+
+assert(sameVenueTimeUnrelatedTitle, 'expected exact same venue/time to be visible as possible duplicate');
+assert.strictEqual(sameVenueTimeUnrelatedTitle.level, 'possible');
+
 const differentDate = scorePotentialDuplicate(
   {
     title: 'Poole and the Gang',
