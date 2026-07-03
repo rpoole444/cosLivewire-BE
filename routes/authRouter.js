@@ -58,6 +58,89 @@ const passwordHashSaltRounds = () => Number(process.env.BCRYPT_SALT_ROUNDS) || 1
 
 const createNewsletterToken = () => crypto.randomBytes(32).toString('hex');
 
+const getFrontendBaseUrl = () => (
+  process.env.FRONTEND_BASE_URL ||
+  process.env.FRONTEND_URL ||
+  process.env.CORS_ORIGIN ||
+  'https://app.alpinegrooveguide.com'
+).replace(/\/+$/, '');
+
+const getApiBaseUrl = (req) => (
+  process.env.API_BASE_URL ||
+  process.env.BACKEND_BASE_URL ||
+  `${req.protocol}://${req.get('host')}`
+).replace(/\/+$/, '');
+
+const getGoogleLoginConfig = (req) => ({
+  clientId: process.env.GOOGLE_LOGIN_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_LOGIN_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET,
+  redirectUri:
+    process.env.GOOGLE_LOGIN_REDIRECT_URI ||
+    `${getApiBaseUrl(req)}/api/auth/google/callback`,
+});
+
+const requireGoogleLoginConfig = (req, res) => {
+  const config = getGoogleLoginConfig(req);
+  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+    res.status(500).json({ message: 'Google login is not configured.' });
+    return null;
+  }
+  return config;
+};
+
+const sanitizeRedirectPath = (value) => {
+  const fallback = '/UserProfile';
+  if (!value) return fallback;
+  const redirect = String(value);
+  if (!redirect.startsWith('/') || redirect.startsWith('//')) return fallback;
+  return redirect;
+};
+
+const splitGoogleName = (name = '') => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: 'Alpine', lastName: 'User' };
+  if (parts.length === 1) return { firstName: parts[0], lastName: 'User' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+};
+
+const normalizeGoogleLoginHint = (value) => {
+  const hint = String(value || '').trim().toLowerCase();
+  if (!hint || hint.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hint)) return null;
+  return hint;
+};
+
+const findOrCreateGoogleUser = async (profile) => {
+  const email = String(profile?.email || '').trim().toLowerCase();
+  if (!email) {
+    const error = new Error('Google did not return an email address.');
+    error.status = 400;
+    throw error;
+  }
+
+  const existing = await findUserByEmail(email);
+  if (existing) return { user: existing, created: false };
+
+  const { firstName, lastName } = splitGoogleName(profile.name);
+  const generatedPassword = crypto.randomBytes(32).toString('hex');
+  const user = await createUser({
+    firstName: profile.given_name || firstName,
+    lastName: profile.family_name || lastName,
+    displayName: profile.name || email.split('@')[0],
+    email,
+    password: generatedPassword,
+    userDescription: '',
+    topMusicGenres: [],
+  });
+
+  try {
+    await sendRegistrationEmail(user.email, user.first_name, user.last_name);
+  } catch (error) {
+    console.error('Google registration email failed:', error);
+  }
+
+  return { user, created: true };
+};
+
 const newsletterUnsubscribeUrl = (token) => {
   const baseUrl = (
     process.env.FRONTEND_BASE_URL ||
@@ -67,6 +150,94 @@ const newsletterUnsubscribeUrl = (token) => {
   ).replace(/\/+$/, '');
   return `${baseUrl || 'https://app.alpinegrooveguide.com'}/unsubscribe/${token}`;
 };
+
+authRouter.get('/google/start', (req, res) => {
+  const config = requireGoogleLoginConfig(req, res);
+  if (!config) return;
+
+  const redirect = sanitizeRedirectPath(req.query.redirect);
+  const state = `${Date.now()}:${crypto.randomBytes(16).toString('hex')}`;
+  req.session.googleLoginOAuthState = state;
+  req.session.googleLoginRedirect = redirect;
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    prompt: 'select_account',
+    state,
+  });
+  const loginHint = normalizeGoogleLoginHint(req.query.login_hint);
+  if (loginHint) {
+    params.set('login_hint', loginHint);
+  }
+
+  return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+authRouter.get('/google/callback', async (req, res) => {
+  const redirectBase = getFrontendBaseUrl();
+  const redirectPath = sanitizeRedirectPath(req.session?.googleLoginRedirect);
+
+  try {
+    const { code, state, error } = req.query;
+    if (error) {
+      return res.redirect(`${redirectBase}/LoginPage?googleLogin=error&message=${encodeURIComponent(String(error))}`);
+    }
+
+    if (!code || !state || state !== req.session?.googleLoginOAuthState) {
+      return res.redirect(`${redirectBase}/LoginPage?googleLogin=error&message=${encodeURIComponent('Invalid Google login response.')}`);
+    }
+
+    const config = getGoogleLoginConfig(req);
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: config.redirectUri,
+        code: String(code),
+        grant_type: 'authorization_code',
+      }),
+    });
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      throw new Error(tokenData?.error_description || 'Unable to finish Google login.');
+    }
+
+    const profileResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = await profileResponse.json().catch(() => ({}));
+    if (!profileResponse.ok || !profile.email) {
+      throw new Error(profile?.error_description || 'Unable to read Google profile.');
+    }
+
+    const { user } = await findOrCreateGoogleUser(profile);
+    req.session.googleLoginOAuthState = null;
+    req.session.googleLoginRedirect = null;
+
+    req.logIn(user, async (loginError) => {
+      if (loginError) {
+        console.error('Google login session failed:', loginError);
+        return res.redirect(`${redirectBase}/LoginPage?googleLogin=error&message=${encodeURIComponent('Unable to create login session.')}`);
+      }
+
+      try {
+        await updateUserLoginStatus(user.id, true);
+      } catch (statusError) {
+        console.error('Google login status update failed:', statusError);
+      }
+
+      return res.redirect(`${redirectBase}${redirectPath}${redirectPath.includes('?') ? '&' : '?'}googleLogin=success`);
+    });
+  } catch (callbackError) {
+    console.error('Google login callback failed:', callbackError);
+    return res.redirect(`${redirectBase}/LoginPage?googleLogin=error&message=${encodeURIComponent(callbackError.message || 'Google login failed.')}`);
+  }
+});
 
 authRouter.delete('/users/:id', async (req, res) => {
   if (!req.isAuthenticated() || !req.user.is_admin) {

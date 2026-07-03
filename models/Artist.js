@@ -26,6 +26,10 @@ const selectPublicEventFields = [
   'events.source_label',
   'venue_profile.profile_image as venue_profile_image',
   'venue_profile.display_name as venue_profile_display_name',
+  'venue_profile.venue_address as venue_profile_address',
+  'venue_profile.venue_city as venue_profile_city',
+  'venue_profile.venue_state as venue_profile_state',
+  'venue_profile.venue_postal_code as venue_profile_postal_code',
 ];
 
 const venueSqlNormalize = (columnOrPlaceholder) => (
@@ -125,7 +129,15 @@ const Artist = {
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const eventsQuery = knex('events')
       .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
-      .select('events.*', 'venue_profile.profile_image as venue_profile_image', 'venue_profile.display_name as venue_profile_display_name')
+      .select(
+        'events.*',
+        'venue_profile.profile_image as venue_profile_image',
+        'venue_profile.display_name as venue_profile_display_name',
+        'venue_profile.venue_address as venue_profile_address',
+        'venue_profile.venue_city as venue_profile_city',
+        'venue_profile.venue_state as venue_profile_state',
+        'venue_profile.venue_postal_code as venue_profile_postal_code'
+      )
       .where({ 'events.is_approved': true })
       .andWhere(function() {
         applyProfileEventMatch(this, artist);
@@ -156,7 +168,11 @@ const Artist = {
             'events.source',
             'events.source_label',
             'venue_profile.profile_image as venue_profile_image',
-            'venue_profile.display_name as venue_profile_display_name'
+            'venue_profile.display_name as venue_profile_display_name',
+            'venue_profile.venue_address as venue_profile_address',
+            'venue_profile.venue_city as venue_profile_city',
+            'venue_profile.venue_state as venue_profile_state',
+            'venue_profile.venue_postal_code as venue_profile_postal_code'
           )
           .where({ 'events.is_approved': true })
           .andWhere(function() {

@@ -1,5 +1,6 @@
 const assert = require('assert');
 const {
+  canonicalVenueLookupName,
   normalizeVenueLookupName,
   venueNamesMatch,
 } = require('../utils/venueProfiles');
@@ -15,6 +16,10 @@ assert.strictEqual(venueNamesMatch("Louie Louie's", "Louie Louie's Piano Bar"), 
 assert.strictEqual(venueNamesMatch('Mill Hill Saloon', "Bloom's Mill Hill Saloon"), true);
 assert.strictEqual(venueNamesMatch("Lulu's", "Lulu's Downstairs"), true);
 assert.strictEqual(venueNamesMatch("Lulu's Downtown", "Lulu's Downstairs"), true);
+assert.strictEqual(canonicalVenueLookupName('The Can'), 'little man ice cream can');
+assert.strictEqual(venueNamesMatch('The Can', 'Little Man Ice Cream Can'), true);
+assert.strictEqual(venueNamesMatch('Little Man Ice Cream Factory Denver', 'Little Man Ice Cream'), true);
+assert.strictEqual(venueNamesMatch('Can', 'Canyon Theater'), false);
 assert.strictEqual(venueNamesMatch('Mission Ballroom', 'Dazzle'), false);
 assert.strictEqual(venueNamesMatch('Boulder Theater', 'Boulder Cafe'), false);
 

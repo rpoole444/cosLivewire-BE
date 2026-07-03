@@ -21,6 +21,22 @@ const normalizeVenueLookupName = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const LITTLE_MAN_CAN_ALIASES = new Set([
+  'can',
+  'the can',
+  'little man ice cream can',
+  'little man ice cream the can',
+  'little man ice cream factory',
+  'little man ice cream factory denver',
+  'little man ice cream',
+]);
+
+const canonicalVenueLookupName = (value) => {
+  const normalized = normalizeVenueLookupName(value);
+  if (LITTLE_MAN_CAN_ALIASES.has(normalized)) return 'little man ice cream can';
+  return normalized;
+};
+
 const GENERIC_SHARED_NAME_TOKENS = new Set([
   'auditorium',
   'bar',
@@ -64,13 +80,17 @@ const getDistinctiveSharedLeadToken = (left, right) => {
 };
 
 const venueNamesMatch = (left, right) => {
-  const normalizedLeft = normalizeVenueLookupName(left);
-  const normalizedRight = normalizeVenueLookupName(right);
+  const normalizedLeft = canonicalVenueLookupName(left);
+  const normalizedRight = canonicalVenueLookupName(right);
   if (!normalizedLeft || !normalizedRight) return false;
+  const leftTokenCount = normalizedLeft.split(' ').filter(Boolean).length;
+  const rightTokenCount = normalizedRight.split(' ').filter(Boolean).length;
+  const leftCanSafelyContain = leftTokenCount >= 2 || normalizedLeft.length >= 5;
+  const rightCanSafelyContain = rightTokenCount >= 2 || normalizedRight.length >= 5;
   return (
     normalizedLeft === normalizedRight ||
-    normalizedLeft.includes(normalizedRight) ||
-    normalizedRight.includes(normalizedLeft) ||
+    (rightCanSafelyContain && normalizedLeft.includes(normalizedRight)) ||
+    (leftCanSafelyContain && normalizedRight.includes(normalizedLeft)) ||
     Boolean(getDistinctiveSharedLeadToken(normalizedLeft, normalizedRight))
   );
 };
@@ -88,7 +108,7 @@ const findVenueProfileByInput = async (
   const requestedId = parseVenueProfileId(venueProfileId);
   if (requestedId) {
     const venue = await db('artists')
-      .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'home_region')
+      .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'venue_state', 'venue_postal_code', 'home_region')
       .where({ id: requestedId, profile_type: 'venue' })
       .whereNull('deleted_at')
       .first();
@@ -99,7 +119,7 @@ const findVenueProfileByInput = async (
   if (!normalizedName) return null;
 
   const venue = await db('artists')
-    .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'home_region')
+    .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'venue_state', 'venue_postal_code', 'home_region')
     .where({ profile_type: 'venue' })
     .whereNull('deleted_at')
     .whereRaw('LOWER(TRIM(display_name)) = ?', [normalizedName])
@@ -110,7 +130,7 @@ const findVenueProfileByInput = async (
   if (venue) return venue;
 
   const venues = await db('artists')
-    .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'home_region', 'is_approved', 'updated_at')
+    .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'venue_state', 'venue_postal_code', 'home_region', 'is_approved', 'updated_at')
     .where({ profile_type: 'venue' })
     .whereNull('deleted_at')
     .orderBy('is_approved', 'desc')
@@ -130,6 +150,7 @@ const findVenueProfileIdByInput = async (
 module.exports = {
   findVenueProfileByInput,
   findVenueProfileIdByInput,
+  canonicalVenueLookupName,
   normalizeVenueName,
   normalizeVenueLookupName,
   parseVenueProfileId,

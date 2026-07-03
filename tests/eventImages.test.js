@@ -5,6 +5,7 @@ const {
   attachEventImageFieldsToMany,
   cleanImageUrl,
   isDefaultImage,
+  isLikelyDirectImageUrl,
   isUsableImageValue,
   resolveEventImage,
 } = require('../utils/eventImages');
@@ -22,6 +23,11 @@ assert.strictEqual(isUsableImageValue('/images/event-placeholder.png'), false);
 assert.strictEqual(isUsableImageValue('/images/event-placeholder.png', { allowDefault: true }), true);
 assert.strictEqual(isUsableImageValue('https://example.com/poster.jpg'), true);
 assert.strictEqual(isUsableImageValue('/uploads/poster.jpg'), true);
+assert.strictEqual(isLikelyDirectImageUrl('https://example.com/poster.jpg?width=1200'), true);
+assert.strictEqual(isUsableImageValue('http://example.com/poster.jpg'), false);
+assert.strictEqual(isUsableImageValue('https://www.eventbrite.com/e/some-ticket-page'), false);
+assert.strictEqual(isUsableImageValue('https://example.com/show-info'), false);
+assert.strictEqual(isUsableImageValue('https://drive.google.com/file/d/123/view'), false);
 
 assert.deepStrictEqual(
   resolveEventImage({
@@ -55,6 +61,18 @@ assert.deepStrictEqual(
   {
     display_image_url: DEFAULT_EVENT_IMAGE_URL,
     display_image_source: 'default',
+    event_poster_status: 'default_or_invalid',
+  }
+);
+
+assert.deepStrictEqual(
+  resolveEventImage({
+    poster: 'https://www.eventbrite.com/e/not-an-image',
+    venue_profile_image: 'https://example.com/venue.webp',
+  }),
+  {
+    display_image_url: 'https://example.com/venue.webp',
+    display_image_source: 'venue_profile_image',
     event_poster_status: 'default_or_invalid',
   }
 );

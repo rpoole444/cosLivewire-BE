@@ -183,14 +183,22 @@ const findDuplicateCandidates = async (db, incomingEvents, { daysBack = 60, days
       'events.slug',
       'events.date',
       'events.start_time',
+      'events.end_time',
       'events.venue_name',
       'events.location',
+      'events.description',
+      'events.website',
+      'events.website_link',
+      'events.poster',
+      'events.is_approved',
       'events.region',
       'events.source',
       'events.source_label',
       'events.source_fingerprint',
+      'events.artist_profile_id',
       'events.venue_profile_id',
-      'venue_profile.display_name as venue_profile_display_name'
+      'venue_profile.display_name as venue_profile_display_name',
+      'venue_profile.profile_image as venue_profile_image'
     )
     .whereBetween('date', [
       startDate.toISOString().slice(0, 10),

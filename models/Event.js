@@ -42,6 +42,11 @@ const getEventsForReview = async () => {
       'venue_profile.display_name as venue_profile_display_name',
       'venue_profile.slug as venue_profile_slug',
       'venue_profile.user_id as venue_profile_user_id',
+      'venue_profile.website as venue_profile_website',
+      'venue_profile.venue_address as venue_profile_address',
+      'venue_profile.venue_city as venue_profile_city',
+      'venue_profile.venue_state as venue_profile_state',
+      'venue_profile.venue_postal_code as venue_profile_postal_code',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -49,6 +54,7 @@ const getEventsForReview = async () => {
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
       'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_artist.website as claimed_artist_website',
       'claimed_user.email as claimed_by_user_email'
     );
 
@@ -66,6 +72,7 @@ const getEventsForReview = async () => {
       slug: row.claimed_artist_slug,
       profile_type: row.claimed_artist_profile_type,
       user_id: row.claimed_artist_user_id,
+      website: row.claimed_artist_website,
     } : null,
     claimed_by_user_email: row.claimed_by_user_email,
   }));
@@ -79,6 +86,7 @@ const getEventsForReview = async () => {
     delete event.claimed_artist_slug;
     delete event.claimed_artist_profile_type;
     delete event.claimed_artist_user_id;
+    delete event.claimed_artist_website;
   });
 
   return shapedEvents;
@@ -103,10 +111,16 @@ const getAllEvents = async ({ region } = {}) => {
       'venue_profile.display_name as venue_profile_display_name',
       'venue_profile.slug as venue_profile_slug',
       'venue_profile.user_id as venue_profile_user_id',
+      'venue_profile.website as venue_profile_website',
+      'venue_profile.venue_address as venue_profile_address',
+      'venue_profile.venue_city as venue_profile_city',
+      'venue_profile.venue_state as venue_profile_state',
+      'venue_profile.venue_postal_code as venue_profile_postal_code',
       'claimed_artist.display_name as claimed_artist_display_name',
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
       'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_artist.website as claimed_artist_website',
       'claimed_user.email as claimed_by_user_email'
     );
   if (region && region !== REGION_ALL && REGION_SLUGS.has(String(region))) {
@@ -121,6 +135,7 @@ const getAllEvents = async ({ region } = {}) => {
       slug: event.claimed_artist_slug,
       profile_type: event.claimed_artist_profile_type,
       user_id: event.claimed_artist_user_id,
+      website: event.claimed_artist_website,
     } : null,
     claimed_by_user_email: event.claimed_by_user_email,
   })));
@@ -145,6 +160,11 @@ const findEventById = async (eventId) => {
       'venue_profile.display_name as venue_profile_display_name',
       'venue_profile.slug as venue_profile_slug',
       'venue_profile.user_id as venue_profile_user_id',
+      'venue_profile.website as venue_profile_website',
+      'venue_profile.venue_address as venue_profile_address',
+      'venue_profile.venue_city as venue_profile_city',
+      'venue_profile.venue_state as venue_profile_state',
+      'venue_profile.venue_postal_code as venue_profile_postal_code',
       'users.first_name as user_first_name',
       'users.last_name as user_last_name',
       'users.email as user_email',
@@ -152,6 +172,7 @@ const findEventById = async (eventId) => {
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
       'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_artist.website as claimed_artist_website',
       'claimed_user.email as claimed_by_user_email'
     )
     .where('events.id', eventId)
@@ -173,6 +194,7 @@ const findEventById = async (eventId) => {
       slug: event.claimed_artist_slug,
       profile_type: event.claimed_artist_profile_type,
       user_id: event.claimed_artist_user_id,
+      website: event.claimed_artist_website,
     } : null,
     claimed_by_user_email: event.claimed_by_user_email,
   });
@@ -188,10 +210,16 @@ const findBySlug = async (slug) => {
       'venue_profile.display_name as venue_profile_display_name',
       'venue_profile.slug as venue_profile_slug',
       'venue_profile.user_id as venue_profile_user_id',
+      'venue_profile.website as venue_profile_website',
+      'venue_profile.venue_address as venue_profile_address',
+      'venue_profile.venue_city as venue_profile_city',
+      'venue_profile.venue_state as venue_profile_state',
+      'venue_profile.venue_postal_code as venue_profile_postal_code',
       'claimed_artist.display_name as claimed_artist_display_name',
       'claimed_artist.slug as claimed_artist_slug',
       'claimed_artist.profile_type as claimed_artist_profile_type',
       'claimed_artist.user_id as claimed_artist_user_id',
+      'claimed_artist.website as claimed_artist_website',
       'claimed_user.email as claimed_by_user_email'
     )
     .where({ 'events.slug': slug, 'events.is_approved': true })
@@ -207,6 +235,7 @@ const findBySlug = async (slug) => {
       slug: event.claimed_artist_slug,
       profile_type: event.claimed_artist_profile_type,
       user_id: event.claimed_artist_user_id,
+      website: event.claimed_artist_website,
     } : null,
     claimed_by_user_email: event.claimed_by_user_email,
   });

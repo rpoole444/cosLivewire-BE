@@ -930,11 +930,22 @@ const shapeDuplicateCandidate = (candidate) => ({
     slug: candidate.event.slug,
     date: candidate.event.date,
     start_time: candidate.event.start_time,
+    end_time: candidate.event.end_time,
     venue_name: candidate.event.venue_name,
     location: candidate.event.location,
+    description: candidate.event.description,
+    website: candidate.event.website,
+    website_link: candidate.event.website_link,
+    poster: candidate.event.poster,
+    display_image_url: attachEventImageFields(candidate.event).display_image_url,
+    display_image_source: attachEventImageFields(candidate.event).display_image_source,
+    is_approved: candidate.event.is_approved,
     region: candidate.event.region,
     source: candidate.event.source,
     source_label: candidate.event.source_label,
+    artist_profile_id: candidate.event.artist_profile_id,
+    venue_profile_id: candidate.event.venue_profile_id,
+    venue_profile_display_name: candidate.event.venue_profile_display_name,
   } : null,
 });
 
@@ -1137,6 +1148,11 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
         });
         const venueProfileId = venueProfile?.id || null;
         const canonicalVenueName = venueProfile?.display_name || event.venue_name || null;
+        const venueCityState = [venueProfile?.venue_city, venueProfile?.venue_state]
+          .filter(Boolean)
+          .join(', ');
+        const finalLocation = event.location || canonicalVenueName || venueCityState || '';
+        const finalAddress = event.address || venueProfile?.venue_address || '';
         const poster = resolveImportPoster({
           explicitPoster: event.poster,
           venueProfile,
@@ -1160,7 +1176,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             skippedEvents.push({
               title,
               venue_name: canonicalVenueName,
-              location: event.location,
+              location: finalLocation,
               date: finalDate,
               start_time: finalStartTime,
               reason: 'Duplicate existing event',
@@ -1224,7 +1240,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
           skippedEvents.push({
             title,
             venue_name: canonicalVenueName,
-            location: event.location,
+            location: finalLocation,
             date: finalDate,
             start_time: finalStartTime,
             reason: `Duplicate existing event (${duplicateMatch.reason})`,
@@ -1247,8 +1263,8 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
             user_id: event.user_id || sourceOwnerUserId || null,
             title,
             description: event.description || '',
-            location: event.location || event.venue_name || '',
-            address: event.address || '',
+            location: finalLocation,
+            address: finalAddress,
             date: finalDate,
             genre: event.genre || null,
             region: normalizeRegion(
@@ -1284,7 +1300,7 @@ importsRouter.post('/:source/:batchId/promote', requireAdmin, async (req, res) =
                 id: promotedEventId,
                 title,
                 venue_name: canonicalVenueName,
-                location: event.location || canonicalVenueName || null,
+                location: finalLocation || null,
                 date: finalDate,
                 start_time: finalStartTime,
                 region: normalizeRegion(
