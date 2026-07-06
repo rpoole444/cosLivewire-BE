@@ -14,7 +14,7 @@ const {
   jaccardSimilarity,
   scorePotentialDuplicate,
 } = require('../utils/eventDuplicateDetection');
-const { attachEventImageFields, isDefaultImage } = require('../utils/eventImages');
+const { attachEventImageFields, isDefaultImage, isUsableImageValue } = require('../utils/eventImages');
 const slugify = require('../utils/slugify');
 const { sendImportBatchSummaryEmail } = require('../models/mailer');
 
@@ -90,6 +90,94 @@ const cleanPosterInput = (value) => {
     return null;
   }
   return cleaned;
+};
+
+const getImportWarnings = (event = {}) => {
+  const value = event.parse_warnings || [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return value
+      .split('\n')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+};
+
+const isDuplicateImportWarning = (warning) => String(warning || '').startsWith('duplicate_');
+
+const isLikelyUrl = (value) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+};
+
+const evaluateImportEventReadiness = (event = {}) => {
+  const warnings = getImportWarnings(event);
+  const blocking = [];
+  const advisory = [];
+
+  if (!String(event.title || event.artist_display || '').trim()) blocking.push('missing_title');
+  if (!String(event.date || '').trim()) blocking.push('missing_date');
+  if (!String(event.start_time || event.time || event.start_at || '').trim()) blocking.push('missing_start_time');
+  if (!String(event.venue_name || event.venue || event.location || '').trim() && !event.venue_profile_id) {
+    blocking.push('missing_venue');
+  }
+  if (!String(event.region || '').trim()) blocking.push('missing_region');
+
+  const hasLocationData = Boolean(
+    String(event.address || event.venue_address || event.location || event.city || '').trim() ||
+    event.venue_profile_id ||
+    String(event.venue_name || event.venue || '').trim()
+  );
+  if (!hasLocationData) advisory.push('missing_location_data');
+
+  if (!String(event.artist_display || event.artist || '').trim()) advisory.push('missing_artist');
+
+  const poster = String(event.poster || '').trim();
+  if (poster && !isUsableImageValue(poster, { allowDefault: true })) {
+    blocking.push('broken_image_url');
+  }
+
+  if (event.website && !isLikelyUrl(event.website)) advisory.push('invalid_website_url');
+  if (event.website_link && !isLikelyUrl(event.website_link)) advisory.push('invalid_ticket_url');
+
+  const duplicateWarnings = warnings.filter(isDuplicateImportWarning);
+  if (duplicateWarnings.length) advisory.push('possible_duplicate');
+
+  const state = blocking.length
+    ? 'blocked'
+    : duplicateWarnings.length
+      ? 'possible_duplicate'
+      : advisory.length
+        ? 'has_warning'
+        : 'ready';
+
+  return {
+    state,
+    ready: blocking.length === 0 && duplicateWarnings.length === 0,
+    canBulkAcceptWithWarnings: blocking.length === 0,
+    blocking,
+    advisory,
+    warnings,
+  };
+};
+
+const selectedImportIds = (rawIds) => {
+  if (!Array.isArray(rawIds)) return [];
+  return [...new Set(
+    rawIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  )];
 };
 
 const getVenueProfileCacheKey = ({ venueProfileId, venueName } = {}) => {
@@ -917,7 +1005,11 @@ const shapeImportEventForResponse = async (db, source, event) => {
     source_image_url: sourceConfig.defaultPoster || null,
     parse_warnings: parseWarningsField(event.parse_warnings),
   };
-  return attachEventImageFields(shaped);
+  const withImages = attachEventImageFields(shaped);
+  return {
+    ...withImages,
+    readiness: evaluateImportEventReadiness(withImages),
+  };
 };
 
 const shapeDuplicateCandidate = (candidate) => ({
@@ -1498,15 +1590,35 @@ importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res)
   try {
     const { source } = req.params;
     const batchId = Number(req.params.batchId);
-    const { action } = req.body || {};
+    const {
+      action,
+      eventIds,
+      allowWarnings = false,
+      confirm = false,
+      edits = {},
+    } = req.body || {};
+    const selectedIds = selectedImportIds(eventIds);
 
     if (!source || !Number.isInteger(batchId)) {
       return res.status(400).json({ message: 'Invalid source or batchId' });
     }
 
-    const supportedActions = ['accept_clean_pending', 'reject_duplicate_pending', 'reject_all_pending'];
+    const supportedActions = [
+      'accept_clean_pending',
+      'reject_duplicate_pending',
+      'reject_all_pending',
+      'accept_selected',
+      'reject_selected',
+      'delete_selected',
+      'clear_broken_posters',
+      'replace_poster',
+      'apply_edits',
+    ];
     if (!supportedActions.includes(action)) {
       return res.status(400).json({ message: 'Unsupported bulk import action.' });
+    }
+    if (['accept_selected', 'reject_selected', 'delete_selected', 'clear_broken_posters', 'replace_poster', 'apply_edits'].includes(action) && !selectedIds.length) {
+      return res.status(400).json({ message: 'Select at least one import row.' });
     }
 
     const result = await knex.transaction(async (trx) => {
@@ -1518,24 +1630,112 @@ importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res)
       if (!canManageBatch(req, batch)) return { error: 'forbidden' };
       if (batch.status === 'completed') return { error: 'batch_already_completed' };
 
-      const pendingEvents = await trx('import_events')
-        .where({ batch_id: batchId, source, status: 'pending' })
-        .whereNull('promoted_event_id')
-        .orderBy('id');
+      const baseQuery = trx('import_events')
+        .where({ batch_id: batchId, source })
+        .whereNull('promoted_event_id');
 
-      const selectedEvents = pendingEvents.filter((event) => {
+      if (selectedIds.length) baseQuery.whereIn('id', selectedIds);
+      if (!['delete_selected', 'apply_edits', 'clear_broken_posters', 'replace_poster'].includes(action)) {
+        baseQuery.where({ status: 'pending' });
+      }
+
+      const importEvents = await baseQuery.orderBy('id');
+      const duplicateCandidates = await findDuplicateCandidates(trx, importEvents);
+
+      const selectedEvents = importEvents.filter((event, index) => {
         const isDuplicate = hasDuplicateWarning(event);
+        const hasComputedDuplicate = (duplicateCandidates.get(index) || []).length > 0;
         if (action === 'accept_clean_pending') return !isDuplicate;
         if (action === 'reject_duplicate_pending') return isDuplicate;
+        if (action === 'accept_selected') {
+          const readiness = evaluateImportEventReadiness(event);
+          if (readiness.blocking.length) return false;
+          if (!allowWarnings && (readiness.advisory.length || isDuplicate || hasComputedDuplicate)) return false;
+          return true;
+        }
+        if (['reject_selected', 'delete_selected', 'clear_broken_posters', 'replace_poster', 'apply_edits'].includes(action)) {
+          return true;
+        }
         return true;
       });
 
       if (!selectedEvents.length) {
-        return { updatedCount: 0, events: [] };
+        return {
+          updatedCount: 0,
+          deletedCount: 0,
+          events: [],
+          skipped: importEvents.map((event, index) => ({
+            id: event.id,
+            reason: action === 'accept_selected'
+              ? 'not_ready_or_needs_warning_confirmation'
+              : (duplicateCandidates.get(index) || []).length ? 'duplicate_candidate' : 'not_selected',
+            readiness: evaluateImportEventReadiness(event),
+          })),
+        };
       }
 
       const ids = selectedEvents.map((event) => event.id);
-      const nextStatus = action === 'accept_clean_pending' ? 'accepted' : 'rejected';
+
+      if (action === 'delete_selected') {
+        if (!confirm) return { error: 'confirm_required' };
+        await trx('import_events')
+          .where({ batch_id: batchId, source })
+          .whereIn('id', ids)
+          .whereNull('promoted_event_id')
+          .delete();
+        return { updatedCount: 0, deletedCount: ids.length, events: [], deletedIds: ids };
+      }
+
+      if (action === 'clear_broken_posters') {
+        const brokenPosterIds = selectedEvents
+          .filter((event) => event.poster && !isUsableImageValue(event.poster, { allowDefault: true }))
+          .map((event) => event.id);
+        if (!brokenPosterIds.length) return { updatedCount: 0, deletedCount: 0, events: [] };
+        const updatedEvents = await trx('import_events')
+          .where({ batch_id: batchId, source })
+          .whereIn('id', brokenPosterIds)
+          .update({ poster: null })
+          .returning('*');
+        return { updatedCount: updatedEvents.length, deletedCount: 0, events: updatedEvents };
+      }
+
+      if (action === 'replace_poster') {
+        const poster = cleanPosterInput(edits.poster);
+        if (!poster) return { error: 'invalid_poster' };
+        const updatedEvents = await trx('import_events')
+          .where({ batch_id: batchId, source })
+          .whereIn('id', ids)
+          .update({ poster })
+          .returning('*');
+        return { updatedCount: updatedEvents.length, deletedCount: 0, events: updatedEvents };
+      }
+
+      if (action === 'apply_edits') {
+        const updatePayload = {};
+        if (edits.venue_name !== undefined) updatePayload.venue_name = cleanOptionalImportText(edits.venue_name, 255);
+        if (edits.region !== undefined) updatePayload.region = normalizeRegion(edits.region) || DEFAULT_REGION;
+        if (edits.age_policy !== undefined) updatePayload.age_policy = cleanOptionalImportText(edits.age_policy, 120);
+        if (edits.website !== undefined) updatePayload.website = cleanOptionalImportText(edits.website, 255);
+        if (edits.website_link !== undefined) updatePayload.website_link = cleanOptionalImportText(edits.website_link, 255);
+        if (edits.genre !== undefined) updatePayload.genre = cleanOptionalImportText(edits.genre, 255);
+        if (edits.artist_profile_id !== undefined) updatePayload.artist_profile_id = parseOptionalProfileId(edits.artist_profile_id);
+        if (edits.venue_profile_id !== undefined) updatePayload.venue_profile_id = parseOptionalProfileId(edits.venue_profile_id);
+        if (edits.poster !== undefined) updatePayload.poster = cleanPosterInput(edits.poster);
+        if (edits.clear_poster === true) updatePayload.poster = null;
+
+        const payloadKeys = Object.keys(updatePayload);
+        if (!payloadKeys.length) return { error: 'empty_edits' };
+
+        const updatedEvents = await trx('import_events')
+          .where({ batch_id: batchId, source })
+          .whereIn('id', ids)
+          .whereNull('promoted_event_id')
+          .update(updatePayload)
+          .returning('*');
+        return { updatedCount: updatedEvents.length, deletedCount: 0, events: updatedEvents };
+      }
+
+      const nextStatus = ['accept_clean_pending', 'accept_selected'].includes(action) ? 'accepted' : 'rejected';
       const updatePayload = nextStatus === 'accepted'
         ? {
             status: nextStatus,
@@ -1559,7 +1759,11 @@ importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res)
 
       return {
         updatedCount: updatedEvents.length,
+        deletedCount: 0,
         events: updatedEvents,
+        skipped: importEvents
+          .filter((event) => !ids.includes(event.id))
+          .map((event) => ({ id: event.id, readiness: evaluateImportEventReadiness(event) })),
       };
     });
 
@@ -1572,9 +1776,21 @@ importsRouter.post('/:source/:batchId/events/bulk', ensureAuth, async (req, res)
     if (result.error === 'batch_already_completed') {
       return res.status(400).json({ message: 'Import batch already completed' });
     }
+    if (result.error === 'confirm_required') {
+      return res.status(400).json({ message: 'Confirm destructive bulk delete before continuing.' });
+    }
+    if (result.error === 'invalid_poster') {
+      return res.status(400).json({ message: 'Use a valid poster image URL.' });
+    }
+    if (result.error === 'empty_edits') {
+      return res.status(400).json({ message: 'Add at least one shared field before applying bulk edits.' });
+    }
 
     return res.json({
-      updatedCount: result.updatedCount,
+      updatedCount: result.updatedCount || 0,
+      deletedCount: result.deletedCount || 0,
+      deletedIds: result.deletedIds || [],
+      skipped: result.skipped || [],
       events: await shapeImportEventsForResponse(knex, source, result.events),
     });
   } catch (error) {
