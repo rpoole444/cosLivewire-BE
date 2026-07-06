@@ -288,6 +288,29 @@ const canManageBatch = (req, batch) => (
   )
 );
 
+const IMPORT_PROFILE_TYPES = ['artist', 'venue', 'promoter'];
+
+const canUseBulkImport = async (req) => {
+  if (req.user?.is_admin) return true;
+  const userId = req.user?.id;
+  if (!userId) return false;
+  const profile = await knex('artists')
+    .select('id')
+    .where({ user_id: userId })
+    .whereIn('profile_type', IMPORT_PROFILE_TYPES)
+    .whereNull('deleted_at')
+    .first();
+  return Boolean(profile);
+};
+
+const requireBulkImportAccess = async (req, res) => {
+  if (await canUseBulkImport(req)) return true;
+  res.status(403).json({
+    message: 'Bulk imports are available to artist, venue, promoter, and admin accounts. Create a public profile first, or use the single-event submission form.',
+  });
+  return false;
+};
+
 const createImportBatchFromParsedEvents = async (
   req,
   res,
@@ -308,6 +331,11 @@ const createImportBatchFromParsedEvents = async (
     const sourceConfig = SOURCE_CONFIG[source];
     if (!sourceConfig) {
       return res.status(400).json({ message: 'Unsupported import source.' });
+    }
+    if (source !== 'moondog' && !(await canUseBulkImport(req))) {
+      return res.status(403).json({
+        message: 'Bulk imports are available to artist, venue, promoter, and admin accounts. Create a public profile first, or use the single-event submission form.',
+      });
     }
 
     const promoterEnv = source === 'moondog' ? process.env.MOONDOG_PROMOTER_ID : null;
@@ -632,6 +660,7 @@ importsRouter.post('/moondog', requireAdmin, (req, res) => createImportBatch(req
 importsRouter.post('/profile', ensureAuth, (req, res) => createImportBatch(req, res, 'profile'));
 
 importsRouter.get('/google/status', ensureAuth, async (req, res) => {
+  if (!(await requireBulkImportAccess(req, res))) return;
   const connected = Boolean(req.session?.googleCalendar?.access_token);
   return res.json({
     connected,
@@ -640,6 +669,7 @@ importsRouter.get('/google/status', ensureAuth, async (req, res) => {
 });
 
 importsRouter.get('/google/connect', ensureAuth, async (req, res) => {
+  if (!(await requireBulkImportAccess(req, res))) return;
   const config = requireGoogleConfig(req, res);
   if (!config) return;
 
@@ -711,6 +741,7 @@ importsRouter.get('/google/callback', ensureAuth, async (req, res) => {
 });
 
 importsRouter.delete('/google/disconnect', ensureAuth, async (req, res) => {
+  if (!(await requireBulkImportAccess(req, res))) return;
   req.session.googleCalendar = null;
   req.session.googleCalendarOAuthState = null;
   return res.json({ connected: false });
@@ -718,6 +749,7 @@ importsRouter.delete('/google/disconnect', ensureAuth, async (req, res) => {
 
 importsRouter.get('/google/calendars', ensureAuth, async (req, res) => {
   try {
+    if (!(await requireBulkImportAccess(req, res))) return;
     if (!(await ensureGoogleCalendarToken(req, res))) return;
     const data = await fetchGoogleJson(
       req,
@@ -740,6 +772,7 @@ importsRouter.get('/google/calendars', ensureAuth, async (req, res) => {
 
 importsRouter.get('/google/events', ensureAuth, async (req, res) => {
   try {
+    if (!(await requireBulkImportAccess(req, res))) return;
     if (!(await ensureGoogleCalendarToken(req, res))) return;
     const calendarId = String(req.query.calendarId || '').trim();
     const timeMin = String(req.query.timeMin || '').trim();
@@ -787,6 +820,7 @@ importsRouter.get('/google/events', ensureAuth, async (req, res) => {
 });
 
 importsRouter.post('/google/stage', ensureAuth, async (req, res) => {
+  if (!(await requireBulkImportAccess(req, res))) return;
   const {
     events = [],
     defaults = {},
