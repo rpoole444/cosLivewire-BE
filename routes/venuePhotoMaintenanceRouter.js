@@ -29,8 +29,9 @@ const parseFilePaths = (value) => {
 venuePhotoMaintenanceRouter.get('/dry-run', async (req, res) => {
   try {
     const filePaths = parseFilePaths(req.query.files || req.query.file);
-    const eventLimit = Math.min(Math.max(Number(req.query.eventLimit) || 250, 1), 1000);
-    const report = await buildVenuePhotoDryRunReport(knex, { filePaths, eventLimit });
+    const eventLimit = Math.min(Math.max(Number(req.query.eventLimit) || 1000, 1), 5000);
+    const missingVenueMinEvents = Math.min(Math.max(Number(req.query.missingVenueMinEvents) || 1, 1), 20);
+    const report = await buildVenuePhotoDryRunReport(knex, { filePaths, eventLimit, missingVenueMinEvents });
     return res.json(report);
   } catch (error) {
     console.error('Venue photo dry-run failed:', error);

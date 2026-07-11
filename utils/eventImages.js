@@ -91,6 +91,53 @@ const isUsableImageValue = (value, { allowDefault = false } = {}) => {
   return isLikelyDirectImageUrl(cleaned);
 };
 
+const normalizeVenueNameForImageLookup = (value) => (
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/\bcolorado\b/g, ' ')
+    .replace(/\bco\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+);
+
+const enrichEventsWithVenueProfilesByName = (events = [], venues = []) => {
+  if (!Array.isArray(events) || !events.length || !Array.isArray(venues) || !venues.length) {
+    return events;
+  }
+
+  const venuesByName = new Map();
+  venues.forEach((venue) => {
+    const key = normalizeVenueNameForImageLookup(venue.display_name || venue.venue_name);
+    if (!key || venuesByName.has(key)) return;
+    venuesByName.set(key, venue);
+  });
+
+  return events.map((event) => {
+    const key = normalizeVenueNameForImageLookup(event.venue_name || event.location);
+    const venue = key ? venuesByName.get(key) : null;
+    if (!venue) return event;
+
+    return {
+      ...event,
+      venue_profile_id: event.venue_profile_id || venue.id || null,
+      venue_profile_image: event.venue_profile_image || venue.profile_image || null,
+      venue_profile_display_name: event.venue_profile_display_name || venue.display_name || null,
+      venue_profile_slug: event.venue_profile_slug || venue.slug || null,
+      venue_profile_user_id: event.venue_profile_user_id || venue.user_id || null,
+      venue_profile_website: event.venue_profile_website || venue.website || null,
+      venue_profile_address: event.venue_profile_address || venue.venue_address || null,
+      venue_profile_city: event.venue_profile_city || venue.venue_city || null,
+      venue_profile_state: event.venue_profile_state || venue.venue_state || null,
+      venue_profile_postal_code: event.venue_profile_postal_code || venue.venue_postal_code || null,
+    };
+  });
+};
+
 const resolveEventImage = (event = {}) => {
   const poster = cleanImageUrl(event.poster);
   const venueImage = cleanImageUrl(
@@ -152,8 +199,10 @@ module.exports = {
   attachEventImageFields,
   attachEventImageFieldsToMany,
   cleanImageUrl,
+  enrichEventsWithVenueProfilesByName,
   isDefaultImage,
   isLikelyDirectImageUrl,
   isUsableImageValue,
+  normalizeVenueNameForImageLookup,
   resolveEventImage,
 };

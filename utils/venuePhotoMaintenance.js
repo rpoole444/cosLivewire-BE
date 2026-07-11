@@ -185,14 +185,42 @@ const buildVenueNameFrequency = (events) => {
       display_name: rawName,
       count: 0,
       sample_event_ids: [],
+      sample_events: [],
+      regions: new Set(),
+      cities: new Set(),
+      addresses: new Set(),
       city: event.city || null,
       region: event.region || null,
+      latest_date: event.date || null,
     };
     current.count += 1;
     if (current.sample_event_ids.length < 5 && event.id) current.sample_event_ids.push(event.id);
+    if (current.sample_events.length < 5 && event.id) {
+      current.sample_events.push({
+        id: event.id,
+        title: event.title,
+        date: event.date,
+        venue_name: rawName,
+        address: event.address || null,
+        region: event.region || null,
+      });
+    }
+    if (event.region) current.regions.add(event.region);
+    if (event.city) current.cities.add(event.city);
+    if (event.address) current.addresses.add(event.address);
+    if (event.date && (!current.latest_date || String(event.date) > String(current.latest_date))) {
+      current.latest_date = event.date;
+    }
     map.set(normalized, current);
   });
-  return [...map.values()].sort((a, b) => b.count - a.count);
+  return [...map.values()]
+    .map((venue) => ({
+      ...venue,
+      regions: [...venue.regions],
+      cities: [...venue.cities],
+      addresses: [...venue.addresses],
+    }))
+    .sort((a, b) => b.count - a.count);
 };
 
 const eventLinkedToVenue = (event, venue) => {
@@ -213,7 +241,7 @@ const selectExistingColumns = (availableColumns, columns) => (
   columns.filter((column) => availableColumns.has(column))
 );
 
-const buildVenuePhotoDryRunReport = async (db, { filePaths = [], eventLimit = 250 } = {}) => {
+const buildVenuePhotoDryRunReport = async (db, { filePaths = [], eventLimit = 1000, missingVenueMinEvents = 1 } = {}) => {
   const artistColumns = await existingColumns(db, 'artists', [
     'id',
     'display_name',
@@ -351,18 +379,45 @@ const buildVenuePhotoDryRunReport = async (db, { filePaths = [], eventLimit = 25
   });
 
   const existingVenueNames = new Set(venues.map((venue) => normalizeVenueCandidateName(venue.display_name)));
+  const possibleVenueMatchesFor = (candidate) => (
+    venues
+      .map((venue) => {
+        const score = jaccard(candidate.normalized_name, venue.display_name);
+        const normalizedVenue = normalizeVenueCandidateName(venue.display_name);
+        const contains = candidate.normalized_name.includes(normalizedVenue) || normalizedVenue.includes(candidate.normalized_name);
+        const finalScore = contains ? Math.max(score, 0.72) : score;
+        if (finalScore < 0.45) return null;
+        return {
+          profile_id: venue.id,
+          display_name: venue.display_name,
+          slug: venue.slug,
+          confidence: finalScore >= 0.82 ? 'high' : finalScore >= 0.62 ? 'medium' : 'low',
+          score: Number(finalScore.toFixed(3)),
+          reason: contains ? 'normalized_name_contains_match' : 'token_similarity',
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+  );
   const missingVenues = buildVenueNameFrequency(events)
-    .filter((venueName) => venueName.count >= 2 && !existingVenueNames.has(venueName.normalized_name))
-    .slice(0, 25)
+    .filter((venueName) => venueName.count >= missingVenueMinEvents && !existingVenueNames.has(venueName.normalized_name))
+    .slice(0, 100)
     .map((venueName) => ({
       name: venueName.display_name,
       normalized_name: venueName.normalized_name,
-      region: venueName.region || inferRegionFromText(venueName.display_name, venueName.city),
+      region: venueName.region || venueName.regions?.[0] || inferRegionFromText(venueName.display_name, venueName.city),
+      regions: venueName.regions || [],
+      cities: venueName.cities || [],
+      addresses: venueName.addresses || [],
       event_count: venueName.count,
       sample_event_ids: venueName.sample_event_ids,
+      sample_events: venueName.sample_events || [],
+      possible_matches: possibleVenueMatchesFor(venueName),
+      latest_date: venueName.latest_date || null,
       confidence: venueName.count >= 4 ? 'medium' : 'low',
       reason: 'appears_in_recent_events_without_matching_venue_profile',
-      recommended_action: venueName.count >= 4 ? 'admin_review_create_shell' : 'admin_review_only',
+      recommended_action: venueName.count >= 4 ? 'admin_review_create_shell' : 'review_create_shell_or_link_existing',
     }));
 
   const brokenEventImages = events

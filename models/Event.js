@@ -5,7 +5,11 @@ const knex = require('knex')(config);
 const { v4: uuidv4 } = require('uuid');
 const slugify = require('../utils/slugify');
 const { REGION_ALL, REGION_SLUGS } = require('../utils/regions');
-const { attachEventImageFields, attachEventImageFieldsToMany } = require('../utils/eventImages');
+const {
+  attachEventImageFields,
+  attachEventImageFieldsToMany,
+  enrichEventsWithVenueProfilesByName,
+} = require('../utils/eventImages');
 
  // Adjust the path as necessary for your project structure
 
@@ -25,6 +29,34 @@ const createRecurringEvents = async (baseEventData, recurrenceDates) => {
   }));
 
   return knex('events').insert(eventsToInsert).returning('*');
+};
+
+const loadVenueProfilesForImageFallback = async () => {
+  return knex('artists')
+    .select(
+      'id',
+      'user_id',
+      'display_name',
+      'slug',
+      'profile_image',
+      'website',
+      'venue_address',
+      'venue_city',
+      'venue_state',
+      'venue_postal_code'
+    )
+    .where({ profile_type: 'venue' })
+    .whereNull('deleted_at');
+};
+
+const applyDynamicVenueImageFallback = async (events = []) => {
+  if (!events.length) return events;
+  const needsVenueLookup = events.some((event) =>
+    !event.venue_profile_image && String(event.venue_name || event.location || '').trim()
+  );
+  if (!needsVenueLookup) return events;
+  const venues = await loadVenueProfilesForImageFallback();
+  return enrichEventsWithVenueProfilesByName(events, venues);
 };
 
 
@@ -59,7 +91,8 @@ const getEventsForReview = async () => {
     );
 
   // 2) Map over these rows to create a nested "user" object
-  const shapedEvents = events.map((row) => attachEventImageFields({
+  const eventsWithVenueFallbacks = await applyDynamicVenueImageFallback(events);
+  const shapedEvents = eventsWithVenueFallbacks.map((row) => attachEventImageFields({
     ...row,
     user: {
       first_name: row.user_first_name,
@@ -127,7 +160,8 @@ const getAllEvents = async ({ region } = {}) => {
     query.where({ 'events.region': region });
   }
   const events = await query;
-  return attachEventImageFieldsToMany(events.map((event) => ({
+  const eventsWithVenueFallbacks = await applyDynamicVenueImageFallback(events);
+  return attachEventImageFieldsToMany(eventsWithVenueFallbacks.map((event) => ({
     ...event,
     claimed_artist: event.artist_profile_id ? {
       id: event.artist_profile_id,
@@ -180,9 +214,11 @@ const findEventById = async (eventId) => {
 
   if (!event) return null;
 
+  const [eventWithVenueFallback] = await applyDynamicVenueImageFallback([event]);
+
   // Nest user data
   return attachEventImageFields({
-    ...event,
+    ...eventWithVenueFallback,
     user: {
       first_name: event.user_first_name,
       last_name: event.user_last_name,
@@ -227,8 +263,10 @@ const findBySlug = async (slug) => {
 
   if (!event) return null;
 
+  const [eventWithVenueFallback] = await applyDynamicVenueImageFallback([event]);
+
   return attachEventImageFields({
-    ...event,
+    ...eventWithVenueFallback,
     claimed_artist: event.artist_profile_id ? {
       id: event.artist_profile_id,
       display_name: event.claimed_artist_display_name,

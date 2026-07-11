@@ -5,7 +5,10 @@ const isInTrial = require('../utils/isInTrial');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
-const { attachEventImageFieldsToMany } = require('../utils/eventImages');
+const {
+  attachEventImageFieldsToMany,
+  enrichEventsWithVenueProfilesByName,
+} = require('../utils/eventImages');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -57,6 +60,34 @@ const applyProfileEventMatch = (builder, artist) => {
   builder
     .where({ 'events.artist_profile_id': artist.id })
     .orWhere({ 'events.user_id': artist.user_id });
+};
+
+const loadVenueProfilesForImageFallback = async () => {
+  return knex('artists')
+    .select(
+      'id',
+      'user_id',
+      'display_name',
+      'slug',
+      'profile_image',
+      'website',
+      'venue_address',
+      'venue_city',
+      'venue_state',
+      'venue_postal_code'
+    )
+    .where({ profile_type: 'venue' })
+    .whereNull('deleted_at');
+};
+
+const applyDynamicVenueImageFallback = async (events = []) => {
+  if (!events.length) return events;
+  const needsVenueLookup = events.some((event) =>
+    !event.venue_profile_image && String(event.venue_name || event.location || '').trim()
+  );
+  if (!needsVenueLookup) return events;
+  const venues = await loadVenueProfilesForImageFallback();
+  return enrichEventsWithVenueProfilesByName(events, venues);
 };
 
 const Artist = {
@@ -150,10 +181,10 @@ const Artist = {
       eventsQuery.limit(5);
     }
 
-    const events = await eventsQuery;
+    const events = await applyDynamicVenueImageFallback(await eventsQuery);
 
     const pastEvents = artist.profile_type === 'venue'
-      ? await knex('events')
+      ? await applyDynamicVenueImageFallback(await knex('events')
           .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
           .select(
             'events.id',
@@ -181,7 +212,7 @@ const Artist = {
           .andWhere('events.date', '<', today)
           .orderBy('events.date', 'desc')
           .orderBy('events.start_time', 'desc')
-          .limit(12)
+          .limit(12))
       : [];
 
       const isTrialExpired =
@@ -229,7 +260,7 @@ const Artist = {
         .orderBy('events.start_time');
     }
 
-    const upcomingEvents = await query.limit(limit);
+    const upcomingEvents = await applyDynamicVenueImageFallback(await query.limit(limit));
 
     return {
       id: artist.id,
@@ -252,7 +283,7 @@ const Artist = {
     if (!artist) return null;
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
-    const events = await knex('events')
+    const events = await applyDynamicVenueImageFallback(await knex('events')
       .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
       .leftJoin('profile_featured_events as pfe', function() {
         this.on('pfe.event_id', '=', 'events.id')
@@ -269,7 +300,7 @@ const Artist = {
       })
       .andWhere('events.date', '>=', today)
       .orderBy('events.date')
-      .orderBy('events.start_time');
+      .orderBy('events.start_time'));
 
     return {
       profile: artist,
