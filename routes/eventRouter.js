@@ -293,6 +293,70 @@ eventRouter.get('/review', isAdmin, async (req, res) => {
   }
 });
 
+eventRouter.put('/review/bulk', isAdmin, async (req, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.eventIds) ? req.body.eventIds : [];
+    const eventIds = [...new Set(rawIds.map((id) => Number(id)).filter(Number.isInteger))];
+    const { isApproved } = req.body || {};
+
+    if (!eventIds.length) {
+      return res.status(400).json({ message: 'Select at least one event.' });
+    }
+    if (typeof isApproved !== 'boolean') {
+      return res.status(400).json({ message: 'Approval status is required.' });
+    }
+    if (!isApproved) {
+      return res.status(400).json({ message: 'Bulk rejection uses the existing delete/reject flow.' });
+    }
+
+    const updatedEvents = await knex('events')
+      .whereIn('id', eventIds)
+      .where({ is_approved: false })
+      .update({ is_approved: true })
+      .returning('*');
+
+    const updatedIds = new Set(updatedEvents.map((event) => Number(event.id)));
+
+    const ownerIds = [
+      ...new Set(
+        updatedEvents
+          .filter((event) => !event.source_import_event_id && event.user_id)
+          .map((event) => Number(event.user_id))
+          .filter(Number.isInteger)
+      ),
+    ];
+    const ownersById = new Map();
+    if (ownerIds.length) {
+      const owners = await knex('users')
+        .select('id', 'email')
+        .whereIn('id', ownerIds);
+      owners.forEach((owner) => ownersById.set(Number(owner.id), owner));
+    }
+
+    for (const event of updatedEvents) {
+      if (event.source_import_event_id) continue;
+      const owner = ownersById.get(Number(event.user_id));
+      if (!owner?.email) continue;
+      try {
+        await sendEventApprovedEmail(event, owner.email);
+      } catch (mailErr) {
+        console.error('Bulk approval e-mail failed:', mailErr);
+      }
+    }
+
+    return res.json({
+      updatedCount: updatedEvents.length,
+      updatedIds: [...updatedIds],
+      skippedIds: eventIds.filter((id) => !updatedIds.has(Number(id))),
+      events: updatedEvents,
+      message: `Approved ${updatedEvents.length} event(s).`,
+    });
+  } catch (error) {
+    console.error('Error bulk approving events:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 /**
  * Update event status (approve/deny)
  */
