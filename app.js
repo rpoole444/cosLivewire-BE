@@ -18,6 +18,7 @@ const inviteRouter = require('./routes/inviteRouter');
 const { router: stripeRouter, webhookRouter } = require('./routes/stripe');
 const importsRouter = require('./routes/importsRouter');
 const venuePhotoMaintenanceRouter = require('./routes/venuePhotoMaintenanceRouter');
+const dataQualityRouter = require('./routes/dataQualityRouter');
 
 const { findUserByEmail, findUserById } = require('./models/User');
 
@@ -94,6 +95,7 @@ app.use('/api/imports', importsRouter);
 app.use('/api/admin', requireAdmin);
 app.use('/api/admin/imports', importsRouter);
 app.use('/api/admin/venue-photo-maintenance', venuePhotoMaintenanceRouter);
+app.use('/api/admin/data-quality', dataQualityRouter);
 app.get('/', (req, res) => res.send('Hello World Welcome to Alpine Groove Guide API!'));
 
 // Error handling middleware should be the last piece of middleware added to the app

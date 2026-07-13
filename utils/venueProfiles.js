@@ -117,6 +117,7 @@ const findVenueProfileByInput = async (
 
   const normalizedName = normalizeVenueName(venueName);
   if (!normalizedName) return null;
+  const normalizedLookupName = canonicalVenueLookupName(venueName);
 
   const venue = await db('artists')
     .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'venue_state', 'venue_postal_code', 'home_region')
@@ -128,6 +129,36 @@ const findVenueProfileByInput = async (
     .first();
 
   if (venue) return venue;
+
+  try {
+    const aliasVenue = await db('venue_aliases as va')
+      .join('artists as a', 'va.venue_profile_id', 'a.id')
+      .select(
+        'a.id',
+        'a.display_name',
+        'a.profile_image',
+        'a.website',
+        'a.venue_address',
+        'a.venue_city',
+        'a.venue_state',
+        'a.venue_postal_code',
+        'a.home_region',
+        'a.is_approved',
+        'a.updated_at'
+      )
+      .where({ 'a.profile_type': 'venue', 'va.is_verified': true })
+      .whereNull('a.deleted_at')
+      .where('va.normalized_alias', normalizedLookupName)
+      .orderBy('a.is_approved', 'desc')
+      .orderBy('va.confidence', 'desc')
+      .first();
+
+    if (aliasVenue) return aliasVenue;
+  } catch (error) {
+    if (error?.code !== '42P01' && error?.code !== 'SQLITE_ERROR') {
+      throw error;
+    }
+  }
 
   const venues = await db('artists')
     .select('id', 'display_name', 'profile_image', 'website', 'venue_address', 'venue_city', 'venue_state', 'venue_postal_code', 'home_region', 'is_approved', 'updated_at')
