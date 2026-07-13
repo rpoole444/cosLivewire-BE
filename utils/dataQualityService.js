@@ -251,6 +251,21 @@ const buildEventIssues = async (db, { limitEvents = 400 } = {}) => {
     db('artists').select('id', 'display_name', 'slug', 'home_region').where({ profile_type: 'artist' }).whereNull('deleted_at').limit(750),
   ]);
   const duplicateCandidates = await findDuplicateCandidates(db, events, { daysBack: 7, daysForward: 120 });
+  const duplicateDecisionKeys = new Set();
+  try {
+    const rows = await db('duplicate_event_decisions')
+      .select('left_event_id', 'right_event_id', 'decision')
+      .whereIn('decision', ['merge', 'reject_duplicate', 'approve_separate']);
+    rows.forEach((row) => {
+      const left = Number(row.left_event_id);
+      const right = Number(row.right_event_id);
+      if (Number.isFinite(left) && Number.isFinite(right)) {
+        duplicateDecisionKeys.add(`${Math.min(left, right)}:${Math.max(left, right)}`);
+      }
+    });
+  } catch (error) {
+    if (error?.code !== '42P01' && error?.code !== 'SQLITE_ERROR') throw error;
+  }
   const eventArtistsByEvent = new Map();
   try {
     const rows = await db('event_artists').select('event_id').count('* as count').groupBy('event_id');
@@ -395,7 +410,12 @@ const buildEventIssues = async (db, { limitEvents = 400 } = {}) => {
     }
 
     const duplicates = (duplicateCandidates.get(index) || [])
-      .filter((candidate) => Number(candidate?.event?.id) !== Number(event.id));
+      .filter((candidate) => {
+        const candidateId = Number(candidate?.event?.id);
+        const eventId = Number(event.id);
+        if (!Number.isFinite(candidateId) || candidateId === eventId) return false;
+        return !duplicateDecisionKeys.has(`${Math.min(candidateId, eventId)}:${Math.max(candidateId, eventId)}`);
+      });
     if (duplicates.length) {
       const best = duplicates[0];
       issues.push(buildIssue({
@@ -413,7 +433,11 @@ const buildEventIssues = async (db, { limitEvents = 400 } = {}) => {
           label: `Compare with ${best.event?.title || `event #${best.event?.id}`}`,
           confidence: best.level,
           score: Number(best.score || 0),
-          payload: { existing_event_id: best.event?.id, reason: best.reason },
+          payload: {
+            existing_event_id: best.event?.id,
+            reason: best.reason,
+            candidate: best.event,
+          },
         }],
         metadata: { ...metadata, duplicate_candidates: duplicates.slice(0, 3) },
         lastUpdated: event.updated_at,

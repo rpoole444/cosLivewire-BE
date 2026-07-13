@@ -15,6 +15,7 @@ const { canonicalVenueLookupName } = require('../utils/venueProfiles');
 const { normalizeRegion } = require('../utils/regions');
 const { isUsableImageValue } = require('../utils/eventImages');
 const { writeAuditLog } = require('../utils/auditLog');
+const { scorePotentialDuplicate } = require('../utils/eventDuplicateDetection');
 
 const dataQualityRouter = express.Router();
 
@@ -34,6 +35,80 @@ const loadVenue = (db, venueId) => db('artists')
   .where({ id: venueId, profile_type: 'venue' })
   .whereNull('deleted_at')
   .first();
+
+const duplicateComparableFields = [
+  'id',
+  'title',
+  'slug',
+  'description',
+  'location',
+  'date',
+  'start_time',
+  'end_time',
+  'venue_name',
+  'venue_profile_id',
+  'artist_profile_id',
+  'genre',
+  'region',
+  'website',
+  'website_link',
+  'poster',
+  'address',
+  'source',
+  'source_label',
+  'is_approved',
+  'created_at',
+  'updated_at',
+];
+
+const loadComparableEvent = (db, eventId) => db('events as e')
+  .leftJoin('artists as venue_profile', 'e.venue_profile_id', 'venue_profile.id')
+  .leftJoin('artists as artist_profile', 'e.artist_profile_id', 'artist_profile.id')
+  .select(
+    ...duplicateComparableFields.map((field) => `e.${field}`),
+    'venue_profile.display_name as venue_profile_display_name',
+    'venue_profile.slug as venue_profile_slug',
+    'artist_profile.display_name as artist_profile_display_name',
+    'artist_profile.slug as artist_profile_slug'
+  )
+  .where('e.id', eventId)
+  .first();
+
+const normalizePair = (leftEventId, rightEventId) => ({
+  left_event_id: Math.min(Number(leftEventId), Number(rightEventId)),
+  right_event_id: Math.max(Number(leftEventId), Number(rightEventId)),
+});
+
+const meaningfulValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0 && !/^(tbd|tba|none)$/i.test(value.trim());
+  return true;
+};
+
+const buildMergePayload = (keepEvent, mergeEvent) => {
+  const mergeableFields = [
+    'title',
+    'description',
+    'location',
+    'start_time',
+    'end_time',
+    'venue_name',
+    'venue_profile_id',
+    'artist_profile_id',
+    'genre',
+    'region',
+    'website',
+    'website_link',
+    'poster',
+    'address',
+  ];
+  return mergeableFields.reduce((payload, field) => {
+    if (!meaningfulValue(keepEvent[field]) && meaningfulValue(mergeEvent[field])) {
+      payload[field] = mergeEvent[field];
+    }
+    return payload;
+  }, {});
+};
 
 dataQualityRouter.get('/summary', async (req, res) => {
   try {
@@ -101,6 +176,154 @@ dataQualityRouter.get('/audit', async (req, res) => {
   } catch (error) {
     console.error('Audit log fetch error:', error);
     return res.status(500).json({ message: 'Unable to load audit logs.' });
+  }
+});
+
+dataQualityRouter.get('/duplicates/compare', async (req, res) => {
+  const leftEventId = parsePositiveInt(req.query.left_event_id);
+  const rightEventId = parsePositiveInt(req.query.right_event_id);
+  if (!leftEventId || !rightEventId || leftEventId === rightEventId) {
+    return res.status(400).json({ message: 'Two different valid event IDs are required.' });
+  }
+
+  try {
+    const [leftEvent, rightEvent] = await Promise.all([
+      loadComparableEvent(knex, leftEventId),
+      loadComparableEvent(knex, rightEventId),
+    ]);
+    if (!leftEvent || !rightEvent) return res.status(404).json({ message: 'One or both events were not found.' });
+
+    const pair = normalizePair(leftEventId, rightEventId);
+    const existingDecision = await knex('duplicate_event_decisions')
+      .where(pair)
+      .orderBy('updated_at', 'desc')
+      .first();
+
+    return res.json({
+      leftEvent,
+      rightEvent,
+      match: scorePotentialDuplicate(leftEvent, rightEvent),
+      existingDecision: existingDecision || null,
+      mergePreview: {
+        keepLeft: buildMergePayload(leftEvent, rightEvent),
+        keepRight: buildMergePayload(rightEvent, leftEvent),
+      },
+    });
+  } catch (error) {
+    console.error('Duplicate compare error:', error);
+    return res.status(500).json({ message: 'Unable to compare duplicate events.' });
+  }
+});
+
+dataQualityRouter.post('/duplicates/decision', async (req, res) => {
+  const leftEventId = parsePositiveInt(req.body?.left_event_id);
+  const rightEventId = parsePositiveInt(req.body?.right_event_id);
+  const decision = String(req.body?.decision || '').trim();
+  const notes = cleanText(req.body?.notes, 1000);
+  const keepEventId = parsePositiveInt(req.body?.keep_event_id);
+
+  if (!leftEventId || !rightEventId || leftEventId === rightEventId) {
+    return res.status(400).json({ message: 'Two different valid event IDs are required.' });
+  }
+  if (!['merge', 'reject_duplicate', 'approve_separate'].includes(decision)) {
+    return res.status(400).json({ message: 'Unsupported duplicate decision.' });
+  }
+  if (decision === 'merge' && keepEventId !== leftEventId && keepEventId !== rightEventId) {
+    return res.status(400).json({ message: 'Choose which event should remain as the primary listing.' });
+  }
+
+  try {
+    const result = await knex.transaction(async (trx) => {
+      const [leftEvent, rightEvent] = await Promise.all([
+        loadComparableEvent(trx, leftEventId),
+        loadComparableEvent(trx, rightEventId),
+      ]);
+      if (!leftEvent || !rightEvent) return { error: 'event_not_found' };
+
+      const pair = normalizePair(leftEventId, rightEventId);
+      let mergePayload = {};
+      let keepEvent = null;
+      let mergeEvent = null;
+      let updatedKeepEvent = null;
+
+      if (decision === 'merge') {
+        keepEvent = keepEventId === leftEventId ? leftEvent : rightEvent;
+        mergeEvent = keepEventId === leftEventId ? rightEvent : leftEvent;
+        mergePayload = buildMergePayload(keepEvent, mergeEvent);
+        mergePayload.updated_at = trx.fn.now();
+
+        const [updated] = await trx('events')
+          .where({ id: keepEvent.id })
+          .update(mergePayload)
+          .returning('*');
+        updatedKeepEvent = updated || null;
+
+        await trx('events')
+          .where({ id: mergeEvent.id })
+          .update({
+            is_approved: false,
+            updated_at: trx.fn.now(),
+          });
+      }
+
+      const existingDecision = await trx('duplicate_event_decisions')
+        .where(pair)
+        .whereNull('import_event_id')
+        .first();
+      let decisionRows;
+      if (existingDecision) {
+        decisionRows = await trx('duplicate_event_decisions')
+          .where({ id: existingDecision.id })
+          .update({
+            decision,
+            notes,
+            decided_by: req.user?.id || null,
+            updated_at: trx.fn.now(),
+          })
+          .returning('*');
+      } else {
+        decisionRows = await trx('duplicate_event_decisions')
+          .insert({
+            ...pair,
+            import_event_id: null,
+            decision,
+            notes,
+            decided_by: req.user?.id || null,
+            updated_at: trx.fn.now(),
+          })
+          .returning('*');
+      }
+
+      const decisionRow = decisionRows[0] || decisionRows;
+      await writeAuditLog(trx, {
+        actorUserId: req.user?.id,
+        action: `duplicate_${decision}`,
+        entityType: 'event',
+        entityId: keepEvent?.id || leftEventId,
+        previousValue: {
+          leftEvent,
+          rightEvent,
+        },
+        newValue: {
+          decision: decisionRow,
+          mergePayload,
+          kept_event_id: keepEvent?.id || null,
+          merged_event_id: mergeEvent?.id || null,
+        },
+      });
+
+      return {
+        decision: decisionRow,
+        keptEvent: updatedKeepEvent,
+        mergedEventId: mergeEvent?.id || null,
+      };
+    });
+
+    if (result.error === 'event_not_found') return res.status(404).json({ message: 'One or both events were not found.' });
+    return res.json(result);
+  } catch (error) {
+    console.error('Duplicate decision error:', error);
+    return res.status(500).json({ message: 'Unable to save duplicate decision.' });
   }
 });
 

@@ -60,13 +60,21 @@ const normalizeTime = (value) => {
 const normalizeDate = (value) => {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    if (year < 1900 || year > 2200) return null;
     return value.toISOString().slice(0, 10);
   }
   if (value instanceof Date) return null;
   const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const date = text.slice(0, 10);
+    const parsed = new Date(`${date}T00:00:00Z`);
+    const year = parsed.getUTCFullYear();
+    return Number.isNaN(parsed.getTime()) || year < 1900 || year > 2200 ? null : date;
+  }
   const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  const year = parsed.getUTCFullYear();
+  return Number.isNaN(parsed.getTime()) || year < 1900 || year > 2200 ? null : parsed.toISOString().slice(0, 10);
 };
 
 const timeDistanceMinutes = (left, right) => {

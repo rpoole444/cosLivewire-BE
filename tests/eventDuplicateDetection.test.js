@@ -94,6 +94,8 @@ assert.strictEqual(differentDate, null);
 assert.strictEqual(normalizeDate(new Date('not-a-date')), null);
 assert.strictEqual(normalizeDate('not-a-date'), null);
 assert.strictEqual(normalizeDate('2026-07-01T00:00:00.000Z'), '2026-07-01');
+assert.strictEqual(normalizeDate('+020225-11-01'), null);
+assert.strictEqual(normalizeDate(new Date('+020225-11-01')), null);
 
 (async () => {
   const emptyDuplicateResults = await findDuplicateCandidates(
