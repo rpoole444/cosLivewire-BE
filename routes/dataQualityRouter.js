@@ -38,6 +38,7 @@ const loadVenue = (db, venueId) => db('artists')
 
 const duplicateComparableFields = [
   'id',
+  'user_id',
   'title',
   'slug',
   'description',
@@ -57,6 +58,8 @@ const duplicateComparableFields = [
   'source',
   'source_label',
   'is_approved',
+  'claimed_by_user_id',
+  'last_edited_by_user_id',
   'created_at',
   'updated_at',
 ];
@@ -64,12 +67,23 @@ const duplicateComparableFields = [
 const loadComparableEvent = (db, eventId) => db('events as e')
   .leftJoin('artists as venue_profile', 'e.venue_profile_id', 'venue_profile.id')
   .leftJoin('artists as artist_profile', 'e.artist_profile_id', 'artist_profile.id')
+  .leftJoin('users as submitter', 'e.user_id', 'submitter.id')
+  .leftJoin('users as claimed_user', 'e.claimed_by_user_id', 'claimed_user.id')
+  .leftJoin('users as last_editor', 'e.last_edited_by_user_id', 'last_editor.id')
+  .leftJoin('users as venue_owner', 'venue_profile.user_id', 'venue_owner.id')
   .select(
     ...duplicateComparableFields.map((field) => `e.${field}`),
     'venue_profile.display_name as venue_profile_display_name',
     'venue_profile.slug as venue_profile_slug',
+    'venue_profile.user_id as venue_profile_user_id',
+    'venue_owner.email as venue_profile_owner_email',
     'artist_profile.display_name as artist_profile_display_name',
-    'artist_profile.slug as artist_profile_slug'
+    'artist_profile.slug as artist_profile_slug',
+    'submitter.email as submitter_email',
+    'submitter.first_name as submitter_first_name',
+    'submitter.last_name as submitter_last_name',
+    'claimed_user.email as claimed_by_user_email',
+    'last_editor.email as last_edited_by_user_email'
   )
   .where('e.id', eventId)
   .first();

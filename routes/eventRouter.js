@@ -63,7 +63,7 @@ const canEditEvent = (event, user) => {
 
 const canDeleteEvent = (event, user) => {
   if (!event || !user) return false;
-  return user.is_admin || event.user_id === user.id;
+  return canEditEvent(event, user);
 };
 
 const isGenericImportedPoster = (event) => {
