@@ -27,10 +27,8 @@ assert.strictEqual(events.length, 9, 'expected 9 parsed events');
 const tokkiEvent = events[0];
 assert.strictEqual(tokkiEvent.venue_name, 'Tokki');
 assert.strictEqual(tokkiEvent.artist_display, 'Heavy Devils Trio');
-assert.strictEqual(
-  dayjs(tokkiEvent.start_at).format('YYYY-MM-DD HH:mm'),
-  dayjs(`${currentYear}-12-11 18:30`).format('YYYY-MM-DD HH:mm')
-);
+assert.strictEqual(tokkiEvent.date, `${currentYear}-12-11`);
+assert.strictEqual(tokkiEvent.start_time, '18:30:00');
 assert.strictEqual(tokkiEvent.raw_block, 'Tokki, Heavy Devils Trio, 6:30 p.m.');
 
 const kinfolksEvents = events.filter((event) => event.venue_name === 'Kinfolks');
