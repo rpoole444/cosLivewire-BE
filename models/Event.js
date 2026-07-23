@@ -1,6 +1,6 @@
 // models/Event.js
 const knex = require('../db/knex');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const slugify = require('../utils/slugify');
 const { REGION_ALL, REGION_SLUGS } = require('../utils/regions');
 const {
@@ -16,14 +16,14 @@ const createEvent = async (eventData) => {
 };
 
 const createRecurringEvents = async (baseEventData, recurrenceDates) => {
-  const recurring_group_id = uuidv4();
+  const recurring_group_id = randomUUID();
   const baseSlug = baseEventData.slug || slugify(baseEventData.title);
 
   const eventsToInsert = recurrenceDates.map((recurrenceDate) => ({
     ...baseEventData,
     date: recurrenceDate,
     recurring_group_id,
-    slug: `${baseSlug}-${uuidv4()}`,
+    slug: `${baseSlug}-${randomUUID()}`,
   }));
 
   return knex('events').insert(eventsToInsert).returning('*');

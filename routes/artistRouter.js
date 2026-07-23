@@ -4,10 +4,10 @@ const express = require('express');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const crypto = require('crypto');
+const { randomUUID } = crypto;
 const { S3Client, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
-const { v4: uuidv4 } = require('uuid');
 const { ensureAuth } = require('../middleware/auth')
 const isAdmin = require('../utils/isAdmin');
 const artistRouter = express.Router();
@@ -96,7 +96,7 @@ const upload = multer({
     bucket: process.env.AWS_S3_BUCKET_NAME,
     contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => cb(null, `artists/${uuidv4()}-${safeFileName(file.originalname)}`),
+    key: (req, file, cb) => cb(null, `artists/${randomUUID()}-${safeFileName(file.originalname)}`),
   }),
 });
 const inquiryRateLimit = createRateLimit({

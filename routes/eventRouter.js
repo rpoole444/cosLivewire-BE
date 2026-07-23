@@ -2,9 +2,9 @@ const express = require('express');
 const knex = require('../db/knex');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
+const { randomUUID } = require('crypto');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
-const { v4: uuidv4 } = require('uuid');
 const {
   sendEventReceiptEmail,
   sendEventApprovedEmail,
@@ -55,7 +55,7 @@ const upload = multer({
     bucket: process.env.AWS_S3_BUCKET_NAME,
     contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => cb(null, `events/${uuidv4()}-${safeFileName(file.originalname)}`),
+    key: (req, file, cb) => cb(null, `events/${randomUUID()}-${safeFileName(file.originalname)}`),
   }),
 });
 
