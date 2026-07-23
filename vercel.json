@@ -1,6 +1,11 @@
 {
   "redirects": [
     {
+      "source": "/",
+      "destination": "https://api.alpinegrooveguide.com/",
+      "permanent": false
+    },
+    {
       "source": "/:path*",
       "destination": "https://api.alpinegrooveguide.com/:path*",
       "permanent": false
