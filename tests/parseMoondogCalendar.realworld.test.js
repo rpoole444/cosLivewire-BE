@@ -1,5 +1,4 @@
 const assert = require('assert');
-const dayjs = require('dayjs');
 const { parseMoondogCalendar } = require('../utils/parseMoondogCalendar');
 
 const currentYear = new Date().getFullYear();
@@ -23,18 +22,14 @@ assert.ok(millHill.start_at instanceof Date);
 const whatsLeft = events[1];
 assert.strictEqual(whatsLeft.artist_display, 'TBA');
 assert.ok(whatsLeft.parse_warnings.includes('artist_missing'));
-assert.strictEqual(
-  dayjs(whatsLeft.start_at).format('YYYY-MM-DD HH:mm'),
-  dayjs(`${currentYear}-11-01 20:00`).format('YYYY-MM-DD HH:mm')
-);
+assert.strictEqual(whatsLeft.date, `${currentYear}-11-01`);
+assert.strictEqual(whatsLeft.start_time, '20:00:00');
 
 const multiTime = events[2];
 assert.strictEqual(multiTime.artist_display, 'TBA');
 assert.ok(multiTime.parse_warnings.includes('multiple_times'));
 assert.ok(multiTime.parse_warnings.includes('artist_missing'));
-assert.strictEqual(
-  dayjs(multiTime.start_at).format('YYYY-MM-DD HH:mm'),
-  dayjs(`${currentYear}-11-01 13:30`).format('YYYY-MM-DD HH:mm')
-);
+assert.strictEqual(multiTime.date, `${currentYear}-11-01`);
+assert.strictEqual(multiTime.start_time, '13:30:00');
 
 console.log('parseMoondogCalendar real-world tests passed');
