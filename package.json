@@ -28,7 +28,7 @@
     "@aws-sdk/credential-provider-env": "^3.972.17",
     "@aws-sdk/lib-storage": "^3.1093.0",
     "@aws-sdk/s3-request-presigner": "^3.1093.0",
-    "bcryptjs": "^2.4.3",
+    "bcryptjs": "^3.0.3",
     "connect-redis": "^8.1.0",
     "cors": "^2.8.5",
     "dayjs": "^1.11.19",
