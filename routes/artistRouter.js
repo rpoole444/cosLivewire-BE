@@ -1,6 +1,4 @@
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 
 const express = require('express');
 const multer = require('multer');
@@ -22,6 +20,9 @@ const {
 } = require('../utils/access');
 const { computeProActive } = require('../utils/proState');
 const { normalizeRegion } = require('../utils/regions');
+const { profileFileFilter, safeFileName } = require('../utils/uploadPolicy');
+const { profileResponseForUser } = require('../utils/profileAccess');
+const { clientKey, createRateLimit } = require('../middleware/rateLimit');
 const {
   sendBookingInquiryEmail,
   sendVenueBookingRequestEmail,
@@ -88,12 +89,21 @@ const s3 = new S3Client({
 });
 
 const upload = multer({
+  limits: { fileSize: 15 * 1024 * 1024, files: 4 },
+  fileFilter: profileFileFilter,
   storage: multerS3({
     s3,
     bucket: process.env.AWS_S3_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => cb(null, `artists/${uuidv4()}-${file.originalname}`),
+    key: (req, file, cb) => cb(null, `artists/${uuidv4()}-${safeFileName(file.originalname)}`),
   }),
+});
+const inquiryRateLimit = createRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => clientKey(req, req.params.slug),
+  message: 'Too many inquiry attempts. Please wait before sending another message.',
 });
 
 // GET all public artist profiles
@@ -461,7 +471,7 @@ artistRouter.get('/:slug/analytics', ensureAuth, async (req, res) => {
   }
 });
 
-artistRouter.post('/:slug/inquiry', async (req, res) => {
+artistRouter.post('/:slug/inquiry', inquiryRateLimit, async (req, res) => {
   try {
     const artist = await Artist.findBySlug(req.params.slug);
     if (!artist || !artist.is_approved) {
@@ -503,7 +513,7 @@ artistRouter.post('/:slug/inquiry', async (req, res) => {
   }
 });
 
-artistRouter.post('/:slug/venue-booking-request', async (req, res) => {
+artistRouter.post('/:slug/venue-booking-request', inquiryRateLimit, async (req, res) => {
   try {
     const venue = await Artist.findBySlug(req.params.slug);
     if (!venue || !venue.is_approved || venue.profile_type !== 'venue') {
@@ -607,7 +617,7 @@ artistRouter.get('/:slug', async (req, res) => {
       is_admin_editor: Boolean(req.isAuthenticated?.() && req.user?.is_admin),
     };
 
-    res.json(enrichedArtist);
+    res.json(profileResponseForUser(enrichedArtist, req.user));
   } catch (err) {
     console.error('Error fetching artist:', err);
     res.status(500).json({ message: 'Server error' });
@@ -618,15 +628,14 @@ artistRouter.get('/:slug', async (req, res) => {
 // POST create artist profile
 artistRouter.post(
   '/',
+  ensureAuth,
   upload.fields([
-    { name: 'profile_image' },
-    { name: 'promo_photo' },
-    { name: 'stage_plot' },
-    { name: 'press_kit' },
+    { name: 'profile_image', maxCount: 1 },
+    { name: 'promo_photo', maxCount: 1 },
+    { name: 'stage_plot', maxCount: 1 },
+    { name: 'press_kit', maxCount: 1 },
   ]),
   async (req, res) => {
-    if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
-
     const {
       display_name, bio, contact_email, genres, slug: customSlug,
       embed_youtube, embed_soundcloud, embed_bandcamp, tip_jar_url,
@@ -782,8 +791,12 @@ artistRouter.post(
 );
 
 
-artistRouter.get('/user/:id', async (req, res) => {
+artistRouter.get('/user/:id', ensureAuth, async (req, res) => {
   const { id } = req.params;
+
+  if (Number(id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
 
   try {
     const artist = await Artist.findByUserId(id);
@@ -798,15 +811,13 @@ artistRouter.get('/user/:id', async (req, res) => {
 });
 
 // PUT /api/artists/:slug — update artist profile
-artistRouter.put('/:slug', upload.fields([
+artistRouter.put('/:slug', ensureAuth, upload.fields([
     { name: 'profile_image', maxCount: 1 },
     { name: 'promo_photo', maxCount: 1 },
     { name: 'stage_plot', maxCount: 1 },
     { name: 'press_kit', maxCount: 1 },
   ]),
   async (req, res) => {
-  if (!req.isAuthenticated?.()) return res.status(401).json({ message: 'Unauthorized' });
-
   const { slug } = req.params;
   const artist = await Artist.findBySlug(slug);
   if (!artist) return res.status(404).json({ message: 'Artist not found' });
@@ -831,7 +842,8 @@ artistRouter.put('/:slug', upload.fields([
       bio: req.body.bio,
       contact_email: req.body.contact_email,
       website: req.body.website,
-      is_pro: req.body.is_pro === 'true',
+      // Billing state is synchronized from the owning user, never from profile input.
+      is_pro: artist.is_pro,
       embed_youtube: req.body.embed_youtube,
       embed_soundcloud: req.body.embed_soundcloud,
       embed_bandcamp: req.body.embed_bandcamp,

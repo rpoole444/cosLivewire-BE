@@ -1,7 +1,5 @@
 const express = require('express');
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const crypto = require('crypto'); // Node.js built-in module
 const bcrypt = require('bcryptjs');
 const passport = require('passport');
@@ -11,11 +9,28 @@ const { fromEnv } = require('@aws-sdk/credential-provider-env');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { sendPasswordResetEmail, sendRegistrationEmail, sendNewsletterEmail } = require("../models/mailer");
-const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
+const { getProfilePictureUrl, deleteProfilePicture, findUserByEmail, findUserById, createUser, updateUserLoginStatus, getAllUsers, setPasswordResetToken, updateUser, updateUserProfilePicture, clearUserResetToken, resetPassword, updateUserAdminStatus, deleteUser, startTrial } = require('../models/User');
 const { computeProActive } = require('../utils/proState');
 const { findInviteByCode, markInviteUsed } = require('../models/Invite');
+const { imageFileFilter, safeFileName, extractS3Key } = require('../utils/uploadPolicy');
+const { clientKey, createRateLimit } = require('../middleware/rateLimit');
+const { userResponse } = require('../utils/userResponse');
+const { parseGenreSelection } = require('../utils/profileInput');
 
 const authRouter = express.Router();
+const loginRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => clientKey(req, req.body?.email),
+  message: 'Too many login attempts. Please wait and try again.',
+});
+const registrationRateLimit = createRateLimit({ windowMs: 60 * 60 * 1000, max: 8 });
+const passwordResetRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => clientKey(req, req.body?.email),
+  message: 'Too many password reset attempts. Please wait and try again.',
+});
 authRouter.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.set('Pragma', 'no-cache');
@@ -29,14 +44,17 @@ const s3 = new S3Client({
 });
 
 const upload = multer({
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter: imageFileFilter,
   storage: multerS3({
     s3,
     bucket: process.env.AWS_S3_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => {
       cb(null, { fieldName: file.fieldname });
     },
     key: (req, file, cb) => {
-      const fileName = `profile-pictures/${Date.now().toString()}-${file.originalname}`;
+      const fileName = `profile-pictures/${Date.now().toString()}-${safeFileName(file.originalname)}`;
       cb(null, fileName);
     },
   }),
@@ -50,8 +68,7 @@ function ensureAuthenticated(req, res, next) {
 }
 // Validate password function
 const validatePassword = (password) => {
-  const passwordRegex = /^.{8,}$/; // At least 8 characters
-  return passwordRegex.test(password);
+  return typeof password === 'string' && password.length >= 8 && password.length <= 128;
 };
 
 const passwordHashSaltRounds = () => Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
@@ -111,8 +128,8 @@ const normalizeGoogleLoginHint = (value) => {
 
 const findOrCreateGoogleUser = async (profile) => {
   const email = String(profile?.email || '').trim().toLowerCase();
-  if (!email) {
-    const error = new Error('Google did not return an email address.');
+  if (!email || profile?.email_verified !== true) {
+    const error = new Error('Google did not return a verified email address.');
     error.status = 400;
     throw error;
   }
@@ -245,13 +262,16 @@ authRouter.delete('/users/:id', async (req, res) => {
   }
 
   const { id } = req.params;
+  if (Number(id) === Number(req.user.id)) {
+    return res.status(400).json({ message: 'You cannot delete your own admin account.' });
+  }
 
   try {
     const deletedUser = await deleteUser(Number(id));
     if (!deletedUser) {
       return res.status(404).json({ message: 'User not found or already deleted' });
     }
-    res.json({ message: 'User deleted successfully', user: deletedUser });
+    res.json({ message: 'User deleted successfully', user: userResponse(deletedUser) });
   } catch (error) {
     console.error("Failed to delete user:", error);
     res.status(500).json({ message: 'Server error deleting user' });
@@ -259,7 +279,7 @@ authRouter.delete('/users/:id', async (req, res) => {
 });
 
 // User registration
-authRouter.post('/register', async (req, res, next) => {
+authRouter.post('/register', registrationRateLimit, async (req, res, next) => {
   try {
     const { first_name, last_name, displayName, email, password, user_description, top_music_genres, inviteCode } = req.body;
 
@@ -269,7 +289,7 @@ authRouter.post('/register', async (req, res, next) => {
 
     if (!validatePassword(password)) {
   return res.status(400).json({ 
-    error: 'Password must be at least 8 characters and include a mix of uppercase letters, lowercase letters, numbers, and a symbol.' 
+    error: 'Password must be between 8 and 128 characters.'
   });
 }
     const normalizedEmail = email.toLowerCase();
@@ -279,11 +299,10 @@ authRouter.post('/register', async (req, res, next) => {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    const genres = Array.isArray(top_music_genres)
-      ? top_music_genres.slice(0, 3)
-      : typeof top_music_genres === 'string'
-      ? JSON.parse(top_music_genres).slice(0, 3)
-      : [];
+    const genres = parseGenreSelection(top_music_genres);
+    if (genres === null) {
+      return res.status(400).json({ error: 'Music genres must be a list.' });
+    }
 
     const defaultTrialDays = Number(process.env.DEFAULT_TRIAL_DAYS) || 30;
     let trialDays = null;
@@ -298,18 +317,20 @@ authRouter.post('/register', async (req, res, next) => {
           const hasCapacity =
             invite.max_uses == null || invite.used_count < invite.max_uses;
           if (hasCapacity) {
-            if (
+            const inviteEmailMismatch =
               invite.email &&
               invite.email.toLowerCase() !== normalizedEmail.toLowerCase()
-            ) {
+            ;
+            if (inviteEmailMismatch) {
               console.warn(
                 '[register] invite email mismatch',
                 invite.email,
                 normalizedEmail
               );
+            } else {
+              trialDays = invite.trial_days || defaultTrialDays;
+              appliedInvite = invite;
             }
-            trialDays = invite.trial_days || defaultTrialDays;
-            appliedInvite = invite;
           } else {
             console.warn('[register] invite max uses reached for', invite.code);
           }
@@ -343,13 +364,15 @@ authRouter.post('/register', async (req, res, next) => {
       await markInviteUsed(appliedInvite.id);
     }
 
-    const { password: _, ...userWithoutPassword } = newUser;
-
-    await sendRegistrationEmail(normalizedEmail, first_name, last_name);
+    try {
+      await sendRegistrationEmail(normalizedEmail, first_name, last_name);
+    } catch (mailError) {
+      console.error('Registration email failed after account creation:', mailError);
+    }
 
     res.status(201).json({ 
       message: 'User created successfully',
-      user: userWithoutPassword,
+      user: userResponse(newUser),
     });
   } catch (err) {
     console.error(err);
@@ -358,49 +381,78 @@ authRouter.post('/register', async (req, res, next) => {
 });
 
 // Update user profile route
-authRouter.put('/update-profile', upload.single('profile_picture'), async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
-
+authRouter.put('/update-profile', ensureAuthenticated, upload.single('profile_picture'), async (req, res) => {
   const userId = req.user.id;
   const { first_name, last_name, email, user_description, top_music_genres, displayName } = req.body;
-  const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : req.user.profile_picture;
+  const previousPictureUrl = req.user.profile_picture;
+  const profilePictureUrl = req.file ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}` : previousPictureUrl;
 
   try {
-    const genres = Array.isArray(top_music_genres)
-      ? top_music_genres.slice(0, 3)
-      : typeof top_music_genres === 'string'
-      ? JSON.parse(top_music_genres).slice(0, 3)
-      : [];
+    const genres = parseGenreSelection(top_music_genres);
+    if (genres === null) {
+      if (req.file?.key) await deleteProfilePicture(req.file.key);
+      return res.status(400).json({ message: 'Music genres must be a list.' });
+    }
 
-    if (req.file && req.user.profile_picture) {
-      const oldKey = req.user.profile_picture.split('/').pop();
-      await deleteProfilePicture(oldKey);
+    const normalizedEmail = String(email || req.user.email).trim().toLowerCase();
+    if (normalizedEmail !== String(req.user.email).trim().toLowerCase()) {
+      if (req.file?.key) await deleteProfilePicture(req.file.key);
+      return res.status(400).json({
+        message: 'Email changes require verification and are not available from profile editing yet.',
+      });
     }
 
     const updatedUser = await updateUser(userId, {
       first_name,
       last_name,
       display_name: displayName,
-      email,
+      email: normalizedEmail,
       user_description,
       top_music_genres: JSON.stringify(genres), // Save as JSON string
     }, profilePictureUrl);
 
+    if (req.file && previousPictureUrl) {
+      const oldKey = extractS3Key(previousPictureUrl);
+      if (oldKey) {
+        deleteProfilePicture(oldKey).catch((deleteError) => {
+          console.error('Failed to delete replaced profile picture:', deleteError);
+        });
+      }
+    }
+
     res.json({ message: 'Profile updated successfully', profile_picture: updatedUser.profile_picture });
   } catch (error) {
     console.error('Error updating profile:', error);
+    if (req.file?.key) {
+      deleteProfilePicture(req.file.key).catch((cleanupError) => {
+        console.error('Failed to clean up unused profile picture:', cleanupError);
+      });
+    }
     res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-authRouter.post('/upload-profile-picture', upload.single('profilePicture'), (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
+authRouter.post('/upload-profile-picture', ensureAuthenticated, upload.single('profilePicture'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Profile picture is required.' });
 
-  res.status(200).json({ imageUrl: req.file.location });
+  const previousPictureUrl = req.user.profile_picture;
+  try {
+    const updatedUser = await updateUserProfilePicture(req.user.id, req.file.location);
+    if (previousPictureUrl) {
+      const oldKey = extractS3Key(previousPictureUrl);
+      if (oldKey) {
+        deleteProfilePicture(oldKey).catch((deleteError) => {
+          console.error('Failed to delete replaced profile picture:', deleteError);
+        });
+      }
+    }
+    return res.status(200).json({ imageUrl: updatedUser.profile_picture });
+  } catch (error) {
+    deleteProfilePicture(req.file.key).catch((cleanupError) => {
+      console.error('Failed to clean up unused profile picture:', cleanupError);
+    });
+    return res.status(500).json({ message: 'Unable to save profile picture.' });
+  }
 });
 
 authRouter.get('/profile-picture', ensureAuthenticated, async (req, res) => {
@@ -485,7 +537,7 @@ authRouter.post('/start-trial', async (req, res) => {
     }
 
     const updatedUser = await startTrial(user.id);
-    res.json(updatedUser);
+    res.json(userResponse(updatedUser));
   } catch (error) {
     console.error('Error starting trial:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -494,7 +546,7 @@ authRouter.post('/start-trial', async (req, res) => {
 
 
 // Login user
-authRouter.post('/login', (req, res, next) => {
+authRouter.post('/login', loginRateLimit, (req, res, next) => {
   passport.authenticate('local', async (err, user, info) => {
     if (err) {
       console.error('Passport error:', err);
@@ -514,11 +566,6 @@ authRouter.post('/login', (req, res, next) => {
       if (err) {
         console.error("Error during login", err);
         return res.status(500).json({ message: 'Internal server error' });
-      }
-      if (user.email === 'poole.reid@gmail.com') {
-        user.is_admin = true;
-        // Optionally, if you want to ensure it's reflected in the database:
-        // await updateUserAdminStatus(user.id, true);
       }
       try {
         await updateUserLoginStatus(user.id, true);
@@ -583,7 +630,7 @@ authRouter.get('/users', async (req, res) => {
 
   try {
     const users = await getAllUsers();
-    res.json(users);
+    res.json(users.map(userResponse));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
@@ -687,39 +734,37 @@ authRouter.post('/newsletter/unsubscribe/:token', async (req, res) => {
 });
 
 // Forgot password reset link sent to user email
-authRouter.post('/forgot-password', async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const user = await findUserByEmail(email);
-
-  if (!user) {
-    return res.json({ message: 'If an account exists for that email, we sent a password reset link.' });
-  }
-
-  const resetToken = crypto.randomBytes(32).toString('hex');
-  const hash = await bcrypt.hash(resetToken, passwordHashSaltRounds());
-
-  const expireTime = new Date(Date.now() + 3600000);
-
-  await setPasswordResetToken(user.id, hash, expireTime);
-
+authRouter.post('/forgot-password', passwordResetRateLimit, async (req, res) => {
   try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.json({ message: 'If an account exists for that email, we sent a password reset link.' });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hash = await bcrypt.hash(resetToken, passwordHashSaltRounds());
+    const expireTime = new Date(Date.now() + 3600000);
+
+    await setPasswordResetToken(user.id, hash, expireTime);
     await sendPasswordResetEmail(user.email, resetToken);
-    res.json({ message: 'Please check your email for the password reset link.' });
+    return res.json({ message: 'If an account exists for that email, we sent a password reset link.' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error sending password reset email.' });
+    console.error('Password reset request failed:', error);
+    return res.status(500).json({ message: 'Unable to send a password reset email right now.' });
   }
 });
 
 // Actually resets password
-authRouter.post('/reset-password/:token', async (req, res) => {
+authRouter.post('/reset-password/:token', passwordResetRateLimit, async (req, res) => {
   try {
     const { token } = req.params;
     const email = String(req.body?.email || '').trim().toLowerCase();
     const { password } = req.body;
 
     if (!validatePassword(password)) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+      return res.status(400).json({ message: 'Password must be between 8 and 128 characters.' });
     }
 
     const user = await findUserByEmail(email);
@@ -754,12 +799,19 @@ authRouter.patch('/setAdmin/:userId', async (req, res) => {
   const { userId } = req.params;
   const { is_admin } = req.body;
 
+  if (typeof is_admin !== 'boolean') {
+    return res.status(400).json({ message: 'is_admin must be a boolean.' });
+  }
+  if (Number(userId) === Number(req.user.id) && !is_admin) {
+    return res.status(400).json({ message: 'You cannot revoke your own admin access.' });
+  }
+
   try {
-    const user = await updateUserAdminStatus(userId, is_admin);
-    if (!user) {
+    const users = await updateUserAdminStatus(userId, is_admin);
+    if (!users.length) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json({ message: 'User admin status updated successfully', user });
+    res.json({ message: 'User admin status updated successfully', user: userResponse(users[0]) });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });

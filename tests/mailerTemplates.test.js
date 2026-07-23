@@ -44,7 +44,8 @@ const batchHtml = buildImportBatchSummaryEmailHtml({
 });
 
 assert(batchHtml.includes('1 event accepted'));
-assert(batchHtml.includes('cid:agg-logo'));
+assert(batchHtml.includes('/alpine_groove_guide_favicon.png'));
+assert(!batchHtml.includes('cid:agg-logo'));
 assert(batchHtml.includes('Alpine Groove Guide'));
 assert(batchHtml.includes('Moondog Weekly Calendar'));
 assert(batchHtml.includes('Jazz Night'));
@@ -136,7 +137,7 @@ const passwordResetHtml = buildPasswordResetEmailHtml({
   resetUrl: 'https://app.alpinegrooveguide.com/reset-password/test-token',
 });
 assert(passwordResetHtml.includes('Reset your password'));
-assert(passwordResetHtml.includes('cid:agg-logo'));
+assert(passwordResetHtml.includes('/alpine_groove_guide_favicon.png'));
 assert(passwordResetHtml.includes('/reset-password/test-token'));
 
 const registrationHtml = buildRegistrationEmailHtml({
@@ -145,7 +146,7 @@ const registrationHtml = buildRegistrationEmailHtml({
 });
 assert(registrationHtml.includes('Welcome, Reid Poole'));
 assert(registrationHtml.includes('Open your dashboard'));
-assert(registrationHtml.includes('cid:agg-logo'));
+assert(registrationHtml.includes('/alpine_groove_guide_favicon.png'));
 
 const eventReceiptHtml = buildEventReceiptEmailHtml({
   event: {
@@ -158,7 +159,7 @@ const eventReceiptHtml = buildEventReceiptEmailHtml({
 assert(eventReceiptHtml.includes('Your event is in review'));
 assert(eventReceiptHtml.includes('Submitted Show'));
 assert(eventReceiptHtml.includes('Waiting for review'));
-assert(eventReceiptHtml.includes('cid:agg-logo'));
+assert(eventReceiptHtml.includes('/alpine_groove_guide_favicon.png'));
 
 const eventApprovedHtml = buildEventApprovedEmailHtml({
   event: {
@@ -172,6 +173,6 @@ const eventApprovedHtml = buildEventApprovedEmailHtml({
 assert(eventApprovedHtml.includes('Your event is live'));
 assert(eventApprovedHtml.includes('Approved Show'));
 assert(eventApprovedHtml.includes('/eventRouter/approved-show'));
-assert(eventApprovedHtml.includes('cid:agg-logo'));
+assert(eventApprovedHtml.includes('/alpine_groove_guide_favicon.png'));
 
 console.log('mailer template tests passed.');

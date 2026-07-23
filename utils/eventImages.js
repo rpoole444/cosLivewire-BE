@@ -1,4 +1,4 @@
-const DEFAULT_EVENT_IMAGE_URL = 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png';
+const DEFAULT_EVENT_IMAGE_URL = 'https://app.alpinegrooveguide.com/alpine_groove_guide_favicon.png';
 
 const EMPTY_IMAGE_VALUES = new Set([
   '',

@@ -1,6 +1,4 @@
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const bcrypt = require('bcryptjs');
 const { S3Client, DeleteObjectCommand, GetObjectCommand  } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');

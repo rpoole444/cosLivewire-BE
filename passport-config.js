@@ -1,8 +1,6 @@
 const LocalStrategy = require('passport-local').Strategy;
 const bcrypt = require('bcryptjs');
-const environment = process.env.NODE_ENV || 'development';
-const knexConfig = require('./knexfile')[environment];
-const knex = require('knex')(knexConfig);
+const knex = require('./db/knex');
 
 function initialize(passport, findUserByEmail, findUserById) {
   const authenticateUser = async (email, password, done) => {

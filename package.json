@@ -3,8 +3,14 @@
   "version": "1.0.0",
   "description": "",
   "main": "app.js",
+  "engines": {
+    "node": "24.x"
+  },
+  "overrides": {
+    "lodash": "^4.18.1"
+  },
   "scripts": {
-    "test": "node tests/stripeStatus.test.js && node tests/eventDuplicateDetection.test.js && node tests/parseMoondogCalendar.test.js && node tests/parseMoondogCalendar.realworld.test.js && node tests/parseMoondogCalendar.timezone.test.js && node tests/googleCalendarImport.test.js && node tests/eventImages.test.js && node tests/venueProfiles.test.js && node tests/entityMatching.test.js && node tests/dataQualityService.test.js && node tests/venuePhotoMaintenance.test.js && node tests/mailerTemplates.test.js",
+    "test": "node tests/authMiddleware.test.js && node tests/eventAccess.test.js && node tests/profileAccess.test.js && node tests/profileEventPolicy.test.js && node tests/profileInput.test.js && node tests/userResponse.test.js && node tests/uploadPolicy.test.js && node tests/rateLimit.test.js && node tests/originGuard.test.js && node tests/stripeStatus.test.js && node tests/eventDuplicateDetection.test.js && node tests/parseMoondogCalendar.test.js && node tests/parseMoondogCalendar.realworld.test.js && node tests/parseMoondogCalendar.timezone.test.js && node tests/googleCalendarImport.test.js && node tests/eventImages.test.js && node tests/venueProfiles.test.js && node tests/entityMatching.test.js && node tests/dataQualityService.test.js && node tests/venuePhotoMaintenance.test.js && node tests/mailerTemplates.test.js",
     "check-pro-status": "node scripts/checkProStatus.js",
     "venue-photo:dry-run": "node scripts/venuePhotoDryRun.js",
     "venue-photo:apply": "node scripts/venuePhotoApply.js",
@@ -18,31 +24,31 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.600.0",
-    "@aws-sdk/credential-provider-env": "^3.598.0",
-    "@aws-sdk/lib-storage": "^3.600.0",
-    "@aws-sdk/s3-request-presigner": "^3.600.0",
-    "@vercel/postgres": "^0.9.0",
-    "aws-sdk": "^2.1645.0",
-    "bcrypt": "^5.1.1",
+    "@aws-sdk/client-s3": "^3.1093.0",
+    "@aws-sdk/credential-provider-env": "^3.972.17",
+    "@aws-sdk/lib-storage": "^3.1093.0",
+    "@aws-sdk/s3-request-presigner": "^3.1093.0",
     "bcryptjs": "^2.4.3",
-    "connect-redis": "^8.0.1",
+    "connect-redis": "^8.1.0",
     "cors": "^2.8.5",
     "dayjs": "^1.11.19",
     "dotenv": "^16.4.5",
-    "express": "^4.18.3",
-    "express-session": "^1.18.0",
+    "express": "^4.22.2",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
     "knex": "^3.1.0",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.2.0",
     "multer-s3": "^3.0.1",
-    "nodemailer": "^6.9.13",
+    "nodemailer": "^9.0.3",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pg": "^8.11.3",
-    "redis": "^4.7.0",
+    "redis": "^4.7.1",
     "serverless-http": "^3.2.0",
-    "sqlite3": "^5.1.7",
     "stripe": "^18.2.0"
+  },
+  "devDependencies": {
+    "sqlite3": "^6.0.1"
   }
 }

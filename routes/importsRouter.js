@@ -22,9 +22,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(customParseFormat);
 
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 
 const importsRouter = express.Router();
 
@@ -39,13 +37,13 @@ const SOURCE_CONFIG = {
     label: 'Provided by Alpine Groove Guide',
     ownerEmail: null,
     defaultRegion: DEFAULT_REGION,
-    defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
+    defaultPoster: 'https://app.alpinegrooveguide.com/alpine_groove_guide_favicon.png',
   },
   google_calendar: {
     label: 'Imported from Google Calendar',
     ownerEmail: null,
     defaultRegion: DEFAULT_REGION,
-    defaultPoster: 'https://app.alpinegrooveguide.com/alpine-groove-social-cover.png',
+    defaultPoster: 'https://app.alpinegrooveguide.com/alpine_groove_guide_favicon.png',
   },
 };
 

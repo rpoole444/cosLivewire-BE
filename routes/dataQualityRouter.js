@@ -1,7 +1,5 @@
 const express = require('express');
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const {
   getDataQualityIssues,
   getDataQualitySummary,

@@ -1,7 +1,5 @@
 // mailer.js   (or mailer/index.js)
 const nodemailer = require("nodemailer");
-const path = require("path");
-const fs   = require("fs");
 
 // ---------- transporter ----------
 const transporter = nodemailer.createTransport({
@@ -12,19 +10,13 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// ---------- helper: inline image ----------
-const inlineImage = (filePath, cid) => ({
-  filename: path.basename(filePath),
-  path: filePath,            // absolute or relative to this file
-  cid                         // <img src="cid:cid">
-});
-
-// logo lives in /public — adjust as needed
-const LOGO_PATH = path.join(__dirname, "..", "public", "alpine_groove_guide_icon.png");
-
-const brandedEmailAttachments = () => (
-  fs.existsSync(LOGO_PATH) ? [inlineImage(LOGO_PATH, "agg-logo")] : []
-);
+const brandedEmailAttachments = () => [];
+const EMAIL_LOGO_URL = `${
+  process.env.FRONTEND_BASE_URL ||
+  process.env.FRONTEND_URL ||
+  process.env.CORS_ORIGIN ||
+  "https://app.alpinegrooveguide.com"
+}`.replace(/\/+$/, "") + "/alpine_groove_guide_favicon.png";
 
 const DEFAULT_FRONTEND_BASE_URL = "http://localhost:3001";
 
@@ -114,7 +106,7 @@ const baseEmailShell = ({ title, eyebrow = "Alpine Groove Guide", body }) => `
           <table role="presentation" style="width:100%;border-collapse:collapse">
             <tr>
               <td style="vertical-align:middle;width:78px">
-                <img src="cid:agg-logo" width="64" height="64" alt="Alpine Groove Guide" style="display:block;border:0;border-radius:12px;background:#0b0c09"/>
+                <img src="${EMAIL_LOGO_URL}" width="64" height="64" alt="Alpine Groove Guide" style="display:block;border:0;border-radius:12px;background:#0b0c09"/>
               </td>
               <td style="vertical-align:middle">
                 <p style="margin:0;color:#9fc8bf;font-size:12px;font-weight:800;letter-spacing:0.22em;text-transform:uppercase">${escapeHtml(eyebrow)}</p>

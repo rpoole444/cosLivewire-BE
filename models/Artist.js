@@ -1,6 +1,4 @@
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const isInTrial = require('../utils/isInTrial');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -9,6 +7,7 @@ const {
   attachEventImageFieldsToMany,
   enrichEventsWithVenueProfilesByName,
 } = require('../utils/eventImages');
+const { shouldUseLegacyOwnerFallback } = require('../utils/profileEventPolicy');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -46,20 +45,47 @@ const applyProfileEventMatch = (builder, artist) => {
 
     builder
       .where({ 'events.venue_profile_id': artist.id })
-      .orWhereRaw('LOWER(TRIM(venue_name)) = LOWER(TRIM(?))', [artist.display_name])
       .orWhereRaw(
-        `${eventVenueName} <> '' AND ${profileVenueName} <> '' AND (` +
-          `${eventVenueName} LIKE CONCAT('%', ${profileVenueName}, '%') OR ` +
-          `${profileVenueName} LIKE CONCAT('%', ${eventVenueName}, '%')` +
-        ')',
-        [artist.display_name, artist.display_name, artist.display_name]
+        `${eventVenueName} <> '' AND ${profileVenueName} <> '' AND ${eventVenueName} = ${profileVenueName}`,
+        [artist.display_name, artist.display_name]
       );
     return;
   }
 
-  builder
-    .where({ 'events.artist_profile_id': artist.id })
-    .orWhere({ 'events.user_id': artist.user_id });
+  if ((artist.profile_type || 'artist') === 'promoter') {
+    builder.where({ 'events.user_id': artist.user_id });
+    return;
+  }
+
+  builder.where({ 'events.artist_profile_id': artist.id });
+  if (artist.allow_user_event_fallback && artist.user_id) {
+    builder.orWhere(function legacyOwnerEvent() {
+      this.whereNull('events.artist_profile_id')
+        .andWhere({ 'events.user_id': artist.user_id });
+    });
+  }
+};
+
+const addEventMatchPolicy = async (artist) => {
+  if (!artist || (artist.profile_type || 'artist') !== 'artist' || !artist.user_id) {
+    return artist;
+  }
+
+  const [{ count }] = await knex('artists')
+    .where({ user_id: artist.user_id })
+    .whereNull('deleted_at')
+    .andWhere(function artistProfilesOnly() {
+      this.where({ profile_type: 'artist' }).orWhereNull('profile_type');
+    })
+    .count('* as count');
+
+  return {
+    ...artist,
+    allow_user_event_fallback: shouldUseLegacyOwnerFallback({
+      profileType: artist.profile_type,
+      activeArtistProfileCount: count,
+    }),
+  };
 };
 
 const loadVenueProfilesForImageFallback = async () => {
@@ -156,6 +182,7 @@ const Artist = {
       .first();
 
     if (!artist) return null;
+    const artistWithMatchPolicy = await addEventMatchPolicy(artist);
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const eventsQuery = knex('events')
@@ -171,7 +198,7 @@ const Artist = {
       )
       .where({ 'events.is_approved': true })
       .andWhere(function() {
-        applyProfileEventMatch(this, artist);
+        applyProfileEventMatch(this, artistWithMatchPolicy);
       })
       .andWhere('events.date', '>=', today)
       .orderBy('events.date')
@@ -207,7 +234,7 @@ const Artist = {
           )
           .where({ 'events.is_approved': true })
           .andWhere(function() {
-            applyProfileEventMatch(this, artist);
+            applyProfileEventMatch(this, artistWithMatchPolicy);
           })
           .andWhere('events.date', '<', today)
           .orderBy('events.date', 'desc')
@@ -235,6 +262,7 @@ const Artist = {
       .first();
 
     if (!artist) return null;
+    const artistWithMatchPolicy = await addEventMatchPolicy(artist);
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const mode = options.mode === 'top-picks' ? 'top-picks' : 'upcoming';
@@ -254,7 +282,7 @@ const Artist = {
     } else {
       query
         .andWhere(function() {
-          applyProfileEventMatch(this, artist);
+          applyProfileEventMatch(this, artistWithMatchPolicy);
         })
         .orderBy('events.date')
         .orderBy('events.start_time');
@@ -281,6 +309,7 @@ const Artist = {
       .first();
 
     if (!artist) return null;
+    const artistWithMatchPolicy = await addEventMatchPolicy(artist);
 
     const today = dayjs().tz('America/Denver').format('YYYY-MM-DD');
     const events = await applyDynamicVenueImageFallback(await knex('events')
@@ -296,7 +325,7 @@ const Artist = {
       )
       .where({ 'events.is_approved': true })
       .andWhere(function() {
-        applyProfileEventMatch(this, artist);
+        applyProfileEventMatch(this, artistWithMatchPolicy);
       })
       .andWhere('events.date', '>=', today)
       .orderBy('events.date')

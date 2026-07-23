@@ -1,7 +1,5 @@
 const slugify = require('../utils/slugify');
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 
 async function generateUniqueSlug(title) {
   const baseSlug = slugify(title);

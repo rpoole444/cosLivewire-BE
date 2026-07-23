@@ -1,9 +1,7 @@
 const express = require('express');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { fromEnv } = require('@aws-sdk/credential-provider-env');
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const {
   applyVenuePhotoMaintenancePlan,
   buildVenuePhotoDryRunReport,

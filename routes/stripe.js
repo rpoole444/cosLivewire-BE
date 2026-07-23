@@ -3,10 +3,10 @@ const Stripe = require('stripe');
 const router = express.Router();
 const knex = require('../db/knex');
 const webhookRouter = express.Router(); // << separate router
-const bodyParser = require('body-parser');
 const { recalcListingForUser } = require('../utils/access'); // <- add this
 const { computeProStatusFromSubscription } = require('../utils/stripeStatus');
 const { createTip } = require('../models/Tip');
+const { ensureAuth } = require('../middleware/auth');
 
 /**
  * Stripe integration notes:
@@ -208,28 +208,21 @@ const recordPlatformTipFromSession = async (session) => {
       ? session.payment_intent
       : session.payment_intent?.id || null;
 
-  try {
-    await createTip({
-      tipperUserId,
-      artistId: null,
-      amountCents: tipAmountCents,
-      stripeSessionId: session.id,
-      stripePaymentIntentId: paymentIntentId,
-      source,
-    });
+  await createTip({
+    tipperUserId,
+    artistId: null,
+    amountCents: tipAmountCents,
+    stripeSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+    source,
+  });
 
-    console.log(`${STRIPE_LOG_PREFIX} recorded platform tip`, {
-      tipperUserId,
-      amountCents: tipAmountCents,
-      sessionId: session.id,
-      source,
-    });
-  } catch (err) {
-    console.error(`${STRIPE_LOG_PREFIX} failed to record platform tip`, {
-      sessionId: session.id,
-      error: err,
-    });
-  }
+  console.log(`${STRIPE_LOG_PREFIX} recorded platform tip`, {
+    tipperUserId,
+    amountCents: tipAmountCents,
+    sessionId: session.id,
+    source,
+  });
 };
 
 const handleSubscriptionLifecycleEvent = async (eventType, subscription) => {
@@ -311,11 +304,12 @@ router.post('/create-tip-session', async (req, res) => {
  */
 
 // Create a subscription checkout session
-router.post('/create-checkout-session', async (req, res) => {
-  const { userId, plan } = req.body;
+router.post('/create-checkout-session', ensureAuth, async (req, res) => {
+  const userId = req.user.id;
+  const { plan } = req.body;
 
-  if (!userId || !plan) {
-    return res.status(400).json({ message: 'Missing required data: userId and plan' });
+  if (!['monthly', 'annual'].includes(plan)) {
+    return res.status(400).json({ message: 'Plan must be monthly or annual.' });
   }
 
   const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
@@ -362,7 +356,7 @@ router.post('/create-checkout-session', async (req, res) => {
 
 
 // Stripe webhook route
-webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+webhookRouter.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -401,6 +395,7 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
     }
   } catch (err) {
     console.error(`${STRIPE_LOG_PREFIX} handler error`, err);
+    return res.status(500).json({ received: false });
   }
 
   return res.status(200).json({ received: true });
@@ -408,11 +403,14 @@ webhookRouter.post('/', bodyParser.raw({ type: 'application/json' }), async (req
 
 
 
-router.post('/billing-portal', async (req, res) => {
-  const { userId } = req.body;
+router.post('/billing-portal', ensureAuth, async (req, res) => {
+  const userId = req.user.id;
 
   try {
     const user = await knex('users').where({ id: userId }).first();
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
 
     let customerId = user?.stripe_customer_id;
 

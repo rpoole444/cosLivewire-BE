@@ -1,7 +1,5 @@
 // models/Event.js
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const { v4: uuidv4 } = require('uuid');
 const slugify = require('../utils/slugify');
 const { REGION_ALL, REGION_SLUGS } = require('../utils/regions');
@@ -133,7 +131,7 @@ const updateEventStatus = (eventId, isApproved) => {
     .returning('*'); // For PostgreSQL to return the updated row
 };
 
-const getAllEvents = async ({ region } = {}) => {
+const getAllEvents = async ({ region, from, to, limit } = {}) => {
   const query = knex('events')
     .leftJoin('artists as venue_profile', 'events.venue_profile_id', 'venue_profile.id')
     .leftJoin('artists as claimed_artist', 'events.artist_profile_id', 'claimed_artist.id')
@@ -155,10 +153,15 @@ const getAllEvents = async ({ region } = {}) => {
       'claimed_artist.user_id as claimed_artist_user_id',
       'claimed_artist.website as claimed_artist_website',
       'claimed_user.email as claimed_by_user_email'
-    );
+    )
+    .where({ 'events.is_approved': true });
   if (region && region !== REGION_ALL && REGION_SLUGS.has(String(region))) {
     query.where({ 'events.region': region });
   }
+  if (from) query.where('events.date', '>=', from);
+  if (to) query.where('events.date', '<=', to);
+  query.orderBy('events.date').orderBy('events.start_time').orderBy('events.id');
+  if (limit) query.limit(limit);
   const events = await query;
   const eventsWithVenueFallbacks = await applyDynamicVenueImageFallback(events);
   return attachEventImageFieldsToMany(eventsWithVenueFallbacks.map((event) => ({

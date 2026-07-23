@@ -1,7 +1,5 @@
 const express = require('express');
-const environment = process.env.NODE_ENV || 'development';
-const config = require('../knexfile')[environment];
-const knex = require('knex')(config);
+const knex = require('../db/knex');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const { S3Client } = require('@aws-sdk/client-s3');
@@ -23,6 +21,13 @@ const isAdmin = require('../utils/isAdmin');
 const { hasProAccess } = require('../utils/access');
 const { normalizeRegion } = require('../utils/regions');
 const { findVenueProfileIdByInput } = require('../utils/venueProfiles');
+const { imageFileFilter, safeFileName, extractS3Key } = require('../utils/uploadPolicy');
+const { ensureAuth } = require('../middleware/auth');
+const {
+  canEditEvent,
+  eventResponseForUser,
+  isApprovedEvent,
+} = require('../utils/eventAccess');
 
 const {
   deleteEvent,
@@ -43,23 +48,18 @@ const s3 = new S3Client({
 });
 
 const upload = multer({
+  limits: { fileSize: 12 * 1024 * 1024, files: 200 },
+  fileFilter: imageFileFilter,
   storage: multerS3({
     s3,
     bucket: process.env.AWS_S3_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+    key: (req, file, cb) => cb(null, `events/${uuidv4()}-${safeFileName(file.originalname)}`),
   }),
 });
 
 const eventRouter = express.Router();
-
-const canEditEvent = (event, user) => {
-  if (!event || !user) return false;
-  if (user.is_admin) return true;
-  if (event.user_id === user.id) return true;
-  if (event.venue_profile_user_id && Number(event.venue_profile_user_id) === Number(user.id)) return true;
-  return Number(event.claimed_artist_user_id) === Number(user.id);
-};
 
 const canDeleteEvent = (event, user) => {
   if (!event || !user) return false;
@@ -73,14 +73,9 @@ const isGenericImportedPoster = (event) => {
 /**
  * Submit event (single or recurring)
  */
-eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
-  if (!req.isAuthenticated?.()) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
-
+eventRouter.post('/submit', ensureAuth, upload.single('poster'), async (req, res) => {
   try {
     const {
-      user_id,
       title,
       description,
       location,
@@ -115,7 +110,7 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
     });
 
     const baseEventData = {
-      user_id,
+      user_id: req.user.id,
       title,
       description,
       location,
@@ -165,16 +160,19 @@ eventRouter.post('/submit', upload.single('poster'), async (req, res) => {
 /**
  * Submit multiple events in a single request
  */
-eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) => {
-  if (!req.isAuthenticated?.()) {
-    return res.status(401).json({ message: 'Not authenticated' });
+const requireMultipleEventAccess = async (req, res, next) => {
+  try {
+    const canSubmitMultiple = await hasProAccess(req.user.id);
+    if (!canSubmitMultiple) {
+      return res.status(403).json({ message: 'Artist profile access required for multiple event submission.' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
   }
+};
 
-  const canSubmitMultiple = await hasProAccess(req.user.id);
-  if (!canSubmitMultiple) {
-    return res.status(403).json({ message: 'Artist profile access required for multiple event submission.' });
-  }
-
+eventRouter.post('/submit-multiple', ensureAuth, requireMultipleEventAccess, upload.array('posters', 200), async (req, res) => {
   try {
     const eventsPayload = req.body.events ? JSON.parse(req.body.events) : [];
     const files = req.files || [];
@@ -189,7 +187,6 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
       const posterFile = files[i];
 
       let {
-        user_id,
         title,
         description,
         location,
@@ -223,7 +220,7 @@ eventRouter.post('/submit-multiple', upload.array('posters'), async (req, res) =
       });
 
       const baseEventData = {
-        user_id,
+        user_id: req.user.id,
         title,
         description,
         location,
@@ -699,6 +696,9 @@ eventRouter.post('/:eventId/claim', async (req, res) => {
 
     const event = await findEventById(eventId);
     if (!event) return res.status(404).json({ message: 'Event not found' });
+    if (!isApprovedEvent(event) && !req.user.is_admin) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
 
     const artistProfile = await knex('artists')
       .select('id', 'user_id', 'display_name', 'slug', 'profile_type', 'is_approved', 'deleted_at')
@@ -852,11 +852,7 @@ eventRouter.delete('/:eventId/claim', isAdmin, async (req, res) => {
 /**
  * Edit/update event data
  */
-eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
-  if (!req.isAuthenticated?.()) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
-
+eventRouter.put('/:eventId', ensureAuth, upload.single('poster'), async (req, res) => {
   try {
     const { eventId } = req.params;
     const event = await findEventById(eventId);
@@ -867,27 +863,10 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to edit this event' });
     }
 
-    let poster = event.poster;
-
-    // ✅ Delete old poster if a new one is uploaded
-    if (req.file) {
-      // Parse old poster key from S3 URL
-      if (poster) {
-        const oldKey = poster.split('/').pop(); // Get filename from URL
-        try {
-          await s3.send(new DeleteObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET_NAME,
-            Key: oldKey,
-          }));
-          console.log(`Deleted old poster from S3: ${oldKey}`);
-        } catch (err) {
-          console.error('Failed to delete old poster from S3:', err);
-        }
-      }
-
-      // Set new poster URL
-      poster = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`;
-    }
+    const oldPosterKey = req.file && event.poster ? extractS3Key(event.poster) : null;
+    const poster = req.file
+      ? `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${req.file.key}`
+      : event.poster;
 
     const {
       title,
@@ -933,7 +912,34 @@ eventRouter.put('/:eventId', upload.single('poster'), async (req, res) => {
       updated_at: knex.fn.now(),
     };
 
-    const updatedEvent = await updateEvent(eventId, sanitizedPayload);
+    let updatedEvent;
+    try {
+      updatedEvent = await updateEvent(eventId, sanitizedPayload);
+    } catch (updateError) {
+      if (req.file?.key) {
+        try {
+          await s3.send(new DeleteObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME,
+            Key: req.file.key,
+          }));
+        } catch (cleanupError) {
+          console.error('Failed to clean up unused replacement poster:', cleanupError);
+        }
+      }
+      throw updateError;
+    }
+
+    // Preserve the old image until the database points at the replacement.
+    if (oldPosterKey) {
+      try {
+        await s3.send(new DeleteObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET_NAME,
+          Key: oldPosterKey,
+        }));
+      } catch (deleteError) {
+        console.error('Failed to delete replaced poster from S3:', deleteError);
+      }
+    }
 
     res.json({
       event: {
@@ -957,12 +963,12 @@ eventRouter.get('/:eventId', async (req, res) => {
     const { eventId } = req.params;
     const event = await findEventById(eventId);
     if (!event) return res.status(404).json({ message: 'Event not found' });
-    res.json({
-      ...event,
-      can_edit_event: canEditEvent(event, req.user),
-      can_delete_event: canDeleteEvent(event, req.user),
+    if (!isApprovedEvent(event) && !canEditEvent(event, req.user)) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+    res.json(eventResponseForUser(event, req.user, {
       uses_generic_imported_poster: isGenericImportedPoster(event),
-    });
+    }));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error.' });
@@ -974,8 +980,20 @@ eventRouter.get('/:eventId', async (req, res) => {
  */
 eventRouter.get('/', async (req, res) => {
   try {
-    const events = await getAllEvents({ region: req.query.region });
-    res.json(events);
+    const dateValue = (value) => (
+      typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null
+    );
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 1000)
+      : null;
+    const events = await getAllEvents({
+      region: req.query.region,
+      from: dateValue(req.query.from),
+      to: dateValue(req.query.to),
+      limit,
+    });
+    res.json(events.map((event) => eventResponseForUser(event, req.user)));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error.' });
@@ -987,12 +1005,12 @@ eventRouter.get('/slug/:slug', async (req, res) => {
     const { slug } = req.params;
     const event = await findBySlug(slug);
     if (!event) return res.status(404).json({ message: 'Event not found' });
-    res.json({
-      ...event,
-      can_edit_event: canEditEvent(event, req.user),
-      can_delete_event: canDeleteEvent(event, req.user),
+    if (!isApprovedEvent(event) && !canEditEvent(event, req.user)) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+    res.json(eventResponseForUser(event, req.user, {
       uses_generic_imported_poster: isGenericImportedPoster(event),
-    });
+    }));
   } catch (err) {
     console.error('Error fetching event by slug:', err);
     res.status(500).json({ message: 'Server error' });
