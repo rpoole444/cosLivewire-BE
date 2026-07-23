@@ -3,6 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const { builtinModules } = require('module');
 
+process.env.AWS_S3_BUCKET_NAME ||= 'runtime-dependency-test';
+process.env.AWS_REGION ||= 'us-east-1';
+
 const productionModules = [
   '../models/Event',
   '../routes/eventRouter',
