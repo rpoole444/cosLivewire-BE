@@ -1,15 +1,9 @@
 {
-  "version": 2,
-  "builds": [
+  "redirects": [
     {
-      "src": "api/server.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "api/server.js"
+      "source": "/:path*",
+      "destination": "https://api.alpinegrooveguide.com/:path*",
+      "permanent": false
     }
   ]
 }
